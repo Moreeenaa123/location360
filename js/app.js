@@ -864,6 +864,7 @@ function verDetalleGrupo(gid) {
               <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-2-1.2 7.5 7.5 0 0 1-1.4-1.7c-.1-.2 0-.4.1-.5l.4-.5a2 2 0 0 0 .3-.4c0-.2 0-.3 0-.4s-.6-1.5-.8-2-.4-.5-.6-.5h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4 5.1 5.1 0 0 0 3 .8 2 2 0 0 0 1.4-.7 1.4 1.4 0 0 0 .3-.9v-.5z"/></svg>
               Invitar por WhatsApp
             </button>
+            <button class="btn btn-secundario" onclick="mostrarQrInvitacion(grupoPorId(grupoDetalleId))">Código QR</button>
             <button class="btn btn-secundario" onclick="copiarEnlaceInvitacion(grupoPorId(grupoDetalleId))">Copiar enlace</button>
           </div>
           <div class="texto-suave" style="font-size:12px;margin-top:8px">
@@ -941,6 +942,41 @@ function copiarEnlaceInvitacion(g) {
     navigator.clipboard.writeText(enlace).then(() => mostrarToast("Enlace de invitación copiado.", "exito"));
   } else {
     window.prompt("Copiá este enlace de invitación:", enlace);
+  }
+}
+
+function mostrarQrInvitacion(g) {
+  const enlace = enlaceInvitacion(g);
+  abrirModal(`
+    <h2>Escaneá para unirte</h2>
+    <div class="texto-suave" style="margin-bottom:12px">Apuntá la cámara al código QR para abrir la invitación a <strong>${esc(g.name)}</strong>.</div>
+    <div class="qr-contenedor" id="qrHost" style="text-align:center;background:#fff;padding:14px;border-radius:var(--radio-m);display:inline-block"></div>
+    <div class="qr-enlace">
+      <span class="codigo-grande">${esc(g.code)}</span>
+      <div class="texto-suave" style="font-size:12px;margin-bottom:10px">O ingresá este código manualmente.</div>
+    </div>
+    <div class="fila-acciones">
+      <button class="btn btn-whatsapp" onclick="compartirWhatsApp(grupoPorId(grupoDetalleId))" style="flex:1">Enviar por WhatsApp</button>
+      <button class="btn btn-conexo" onclick="cerrarModal()">Cerrar</button>
+    </div>`);
+
+  const host = $("#qrHost");
+  function pintarLibreria() {
+    if (typeof QRCode === "function") {
+      new QRCode(host, { text: enlace, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.H });
+      return true;
+    }
+    return false;
+  }
+  if (!pintarLibreria()) {
+    // Respaldo: API pública de generación de QR (sin clave)
+    const img = document.createElement("img");
+    img.src = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" + encodeURIComponent(enlace);
+    img.alt = "QR de invitación";
+    img.style.width = "220px";
+    img.style.height = "220px";
+    img.style.borderRadius = "8px";
+    host.appendChild(img);
   }
 }
 
