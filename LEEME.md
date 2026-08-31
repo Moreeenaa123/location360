@@ -1,9 +1,9 @@
 # NEXO · Tu círculo, tu seguridad
 
-Aplicación web estilo Life360 creada **solo con HTML, CSS y JavaScript** (sin frameworks). Muestra a tu círculo en un mapa en vivo, permite crear grupos, lugares, alertas SOS y notificaciones.
+Aplicación web estilo Life360 creada **solo con HTML, CSS y JavaScript** (sin frameworks). Muestra a tu círculo en un mapa en vivo, permite crear grupos, lugares, alertas SOS, notificaciones y navegar a cualquier punto usando la **integración de Waze**.
 
-- **Modo demo (por defecto):** funciona sin servidor; los datos viven en `localStorage`.
-- **Modo nube:** usa **Supabase** para usuarios reales, compartir la ubicación en vivo y tiempo real entre dispositivos.
+- **Base de datos:** usa **Supabase** para usuarios reales, compartir la ubicación en vivo y tiempo real entre dispositivos.
+- **Mapa y navegación:** mapa en vivo + **lonkis de Waze** (Deep Links) para abrir la app de Waze y navegar a una latitud/longitud o dirección, y **mapa integrado de Waze** (iframe) para ver la ubicación.
 
 ## Archivos del proyecto (8)
 
@@ -23,7 +23,7 @@ Aplicación web estilo Life360 creada **solo con HTML, CSS y JavaScript** (sin f
 1. Abre `index.html` en un navegador (doble clic) o,
 2. súbela a GitHub y actívala con **GitHub Pages** → *Settings → Pages*, rama `main`, carpeta `/ (root)`.
 
-> Para probarla sin registrarse: botón **"Cuenta de demostración"** (Alicia García). También puedes entrar con `alicia@nexo.app` / `demo123`.
+> **Nota:** si aún no configuraste Supabase, la app usa una cuenta local de prueba: `alicia@nexo.app` / `demo123`.
 
 ## Activar la base de datos (Supabase, opcional)
 
@@ -47,10 +47,19 @@ window.NEXO_CONFIG = {
 - Login y registro con diseño tipo Life360 (fondo con burbujas, sello NEXO).
 - Mapa oscuro con la ubicación de cada miembro (colores fijos por persona).
 - Grupos con código de invitación, roles (Líder / Co-líder / Miembro).
-- Lugares guardados y enlaces a Waze para navegar.
+- Lugares guardados con **direcciones reales** (Buenos Aires).
+- Integración con **Waze**: botón "Navegar con Waze" (abre la app) y mapa integrado de Waze (iframe) para ver cada lugar.
 - Botón **SOS** con alerta a todo el círculo e historial.
 - Notificaciones con contador de no leídas.
-- En modo demo hay un movimiento simulado para ver la app funcionando sin GPS.
+
+## Integración con Waze
+
+NEXO usa la **API pública de Waze** de dos formas (sin necesitar clave):
+
+1. **Deep Links** — al tocar "Navegar con Waze" se abre `https://www.waze.com/ul?ll=lat,lng&navigate=yes` (o con `q=dirección`) para lanzar la app de Waze y empezar a navegar.
+2. **Live Map (iframe)** — cada lugar embebe `https://embed.waze.com/iframe?zoom=15&lat=..&lon=..&pin=1` para mostrar el mapa de Waze dentro de la app.
+
+Ver [documentación oficial de Waze](https://developers.google.com/waze) para más detalles.
 
 ## Tecnologías
 

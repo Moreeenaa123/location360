@@ -2,21 +2,19 @@
 // NEXO · Tu círculo, tu seguridad
 // JavaScript puro (sin frameworks). Dos modos:
 //   - NUBE:   base de datos Supabase (usuarios reales + tiempo real)
-//   - DEMO:   sin servidor, datos locales en localStorage
-// Mapa: Leaflet + OpenStreetMap oscuro · Estilo inspirado en Life360
+//   - LOCAL:  cuentas de prueba locales (localStorage)
+// Mapa: Leaflet + tiles oscuros Esri · Navegación: Waze · Estilo Life360
 // =====================================================================
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
-const INTERVALO_SIMULACION = 4000;
 const INTERVALO_REPORTE_UBICACION = 5000;
 
 const URL_MAPA = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
 
 const MODO_NUBE = !!(window.NUBE && window.NUBE.activo);
-
-const CUENTA_DEMO = { nombre: "Alicia García", correo: "alicia@nexo.app", clave: "demo123" };
+// Silenciar notificación de contraseña (se usa en "¿Olvidaste tu contraseña?")
 
 // Colores fijos por miembro (estilo Life360)
 const COLORES_MIEMBRO = ["#F2A33C", "#2DD4BF", "#F472B6", "#60A5FA", "#FB7185", "#A3E635", "#38BDF8"];
@@ -29,11 +27,11 @@ let vivo = {};
 let miPos = null;
 let usandoSimulacion = false;
 let watchId = null;
-let intervaloTiempo = null;
 let intervaloReporte = null;
 let fichaAbiertaId = null;
 let grupoDetalleId = null;
 let toastTimer = null;
+let vistaActual = null;
 let entrandoNube = false;
 
 // ============================ UTILIDADES ============================
@@ -174,7 +172,6 @@ function entrarApp() {
   $("#textoEnVivo").textContent = u ? u.name : "en vivo";
   mostrarVista("mapa");
   iniciarMapa();
-  if (!MODO_NUBE) arrancarSimulacion();
   actualizarBadge();
 }
 
@@ -188,7 +185,6 @@ function limpiarSesionUI() {
 
 function salirApp() {
   if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-  if (intervaloTiempo) { clearInterval(intervaloTiempo); intervaloTiempo = null; }
   if (intervaloReporte) { clearInterval(intervaloReporte); intervaloReporte = null; }
   if (mapa) { mapa.remove(); mapa = null; }
   marcadores = {}; vivo = {}; miPos = null; usandoSimulacion = false; fichaAbiertaId = null;
@@ -273,7 +269,7 @@ async function entrarAppNube(user) {
 async function crearGrupoFamilia(uid) {
   if (gruposDe(uid).some((g) => g.code === "NEXO1234")) return;
   const grupo = {
-    id: nuevoId(), name: "Familia", description: "El círculo de demostración",
+    id: nuevoId(), name: "Familia", description: "Círculo de confianza",
     code: "NEXO1234", ownerId: uid, createdAt: fechaISO(),
     members: [{ userId: uid, role: "OWNER" }]
   };
@@ -334,25 +330,13 @@ function registrarUsuario() {
   mostrarToast("Cuenta creada. ¡Bienvenido a NEXO!", "exito");
 }
 
-function entrarDemo() {
-  if (MODO_NUBE) {
-    setCargando(true);
-    window.NUBE.inicioSesion(CUENTA_DEMO.correo, CUENTA_DEMO.clave)
-      .catch(() => window.NUBE.registro(CUENTA_DEMO.nombre, CUENTA_DEMO.correo, CUENTA_DEMO.clave))
-      .then(() => window.NUBE.inicioSesion(CUENTA_DEMO.correo, CUENTA_DEMO.clave))
-      .catch((e) => mostrarToast(e.message, "error"))
-      .finally(() => setCargando(false));
-    return;
-  }
-  entrarComo("u-alicia");
-}
-
 // ============================ NAVEGACION ============================
 
 const NOMBRES_VISTA = { mapa: "Mapa", grupo: "Mi grupo", lugares: "Lugares", alertas: "Alertas", perfil: "Perfil" };
 const IDS_VISTA = { mapa: "vistaMapa", grupo: "vistaGrupo", lugares: "vistaLugares", alertas: "vistaAlertas", perfil: "vistaPerfil" };
 
 function mostrarVista(vista) {
+  vistaActual = vista;
   $$(".vista").forEach((v) => v.classList.add("oculta"));
   $("#" + IDS_VISTA[vista]).classList.remove("oculta");
   $$(".tab").forEach((t) => t.classList.toggle("activa", t.dataset.vista === vista));
@@ -399,7 +383,7 @@ function usarPosicionPorDefecto() {
     POSICION_BASE.lat + (Math.random() - 0.5) * 0.02,
     POSICION_BASE.lng + (Math.random() - 0.5) * 0.02
   );
-  mostrarToast("GPS no disponible: se usa una posición simula.", "aviso");
+  mostrarToast("GPS no disponible: usa el mapa para encontrar tu ubicación.", "aviso");
 }
 
 function fijarPosicionMia(lat, lng) {
@@ -494,34 +478,6 @@ function iniciarReporteNube() {
       window.NUBE.reportarUbicacion(yo.id, miPos.lat, miPos.lng).catch(() => {});
     }
   }, INTERVALO_REPORTE_UBICACION);
-}
-
-// Movimiento simulado (solo en modo demostración)
-function arrancarSimulacion() {
-  if (intervaloTiempo) clearInterval(intervaloTiempo);
-  intervaloTiempo = setInterval(moverMiembros, INTERVALO_SIMULACION);
-}
-
-function moverMiembros() {
-  if (MODO_NUBE) return;
-  const yo = usuarioActual();
-  if (!yo || !mapa) return;
-  miembrosDe(yo.id).forEach((mm) => {
-    if (mm.userId === yo.id) return;
-    const u = usuarioPorId(mm.userId);
-    if (!u || !u.shareLocation) return;
-    if (!vivo[u.id]) vivo[u.id] = posicionInicial();
-    vivo[u.id].lat += (Math.random() - 0.5) * 0.0012;
-    vivo[u.id].lng += (Math.random() - 0.5) * 0.0012;
-    vivo[u.id].lastAt = fechaISO();
-    if (marcadores[u.id]) marcadores[u.id].setLatLng([vivo[u.id].lat, vivo[u.id].lng]);
-  });
-  if (usandoSimulacion && miPos) {
-    miPos.lat += (Math.random() - 0.5) * 0.0008;
-    miPos.lng += (Math.random() - 0.5) * 0.0008;
-    if (marcadores["yo"]) marcadores["yo"].setLatLng([miPos.lat, miPos.lng]);
-  }
-  renderFichaSiAbierta();
 }
 
 // ============================ TIEMPO REAL (SUPABASE) ============================
@@ -630,7 +586,7 @@ function renderFicha() {
     </div>
     <div class="fila-acciones">
       <button class="btn btn-primario" onclick="centrarEn(${lat}, ${lng})">Centrar</button>
-      <button class="btn btn-secundario" onclick="abrirWaze(${lat}, ${lng})">Navegar con Waze</button>
+      <button class="btn btn-waze" onclick="abrirWaze(${lat}, ${lng})">Navegar con Waze</button>
     </div>`;
   el.classList.remove("oculta");
 }
@@ -644,13 +600,25 @@ function cerrarFicha() {
   fichaAbiertaId = null;
 }
 
-function abrirWaze(lat, lng) {
-  const urlWeb = `https://www.waze.com/ul?ll=${lat},${lng}&navigate=yes`;
-  const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-  if (esMovil) {
-    try { window.location.href = `waze://?ll=${lat},${lng}&navigate=yes`; } catch (e) {}
-  }
-  window.open(urlWeb, "_blank");
+function abrirWaze(lat, lng, direccion) {
+  const params = new URLSearchParams({ ll: `${lat},${lng}`, navigate: "yes", utm_source: "nexo" });
+  if (direccion) params.set("q", direccion);
+  const url = `https://www.waze.com/ul?${params}`;
+  window.open(url, "_blank");
+}
+
+function mostrarWazeEmbed(lat, lng, nombre) {
+  const embedUrl = `https://embed.waze.com/iframe?zoom=15&lat=${lat}&lon=${lng}&pin=1`;
+  const wazeUrl = `https://www.waze.com/ul?ll=${lat},${lng}&navigate=yes&utm_source=nexo`;
+  abrirModal(`
+    <h2>${esc(nombre)}</h2>
+    <div class="waze-embed">
+      <iframe src="${embedUrl}" title="Ubicación en Waze" loading="lazy"></iframe>
+    </div>
+    <div class="fila-acciones">
+      <a class="btn btn-waze btn-block" href="${wazeUrl}" target="_blank" rel="noopener">Abrir en Waze</a>
+    </div>
+  `);
 }
 
 // ============================ ALERTA SOS ============================
@@ -965,7 +933,7 @@ function renderLugares() {
           <span class="chip">${esc(p.category)}</span>
         </div>
         <div class="fila-acciones">
-          <button class="btn btn-secundario" onclick="abrirWaze(${p.lat}, ${p.lng})">Navegar</button>
+          <button class="btn btn-waze" onclick="abrirWaze(${p.lat}, ${p.lng}, '${esc(p.address || "").replace(/'/g, "\\'")}')">Navegar con Waze</button>
           <button class="btn btn-peligro" onclick="eliminarLugar('${p.id}')">Eliminar</button>
         </div>
       </div>`;
@@ -1082,7 +1050,7 @@ function renderAlertas() {
           </div>
         </div>
         <div class="fila-acciones">
-          <button class="btn btn-secundario" onclick="abrirWaze(${a.lat}, ${a.lng})">Ir a donde está</button>
+          <button class="btn btn-waze" onclick="abrirWaze(${a.lat}, ${a.lng})">Navegar con Waze</button>
           <button class="btn btn-primario" onclick="resolverSos('${a.id}')">Marcar resuelto</button>
         </div>
       </div>`;
@@ -1123,19 +1091,6 @@ function renderAlertas() {
   });
   html += `</div>`;
 
-  if (!MODO_NUBE) {
-    html += `
-      <div class="seccion-alertas">
-        <h3>🧪 Simulación para presentar</h3>
-        <div class="tarjeta">
-          <div class="texto-suave">Genera una alerta SOS desde un miembro simulado para mostrar el flujo en vivo.</div>
-          <div class="fila-acciones">
-            <button class="btn btn-secundario" onclick="simularSosDeBrian()">SOS desde Brian</button>
-          </div>
-        </div>
-      </div>`;
-  }
-
   $("#contenidoAlertas").innerHTML = html;
 }
 
@@ -1165,27 +1120,6 @@ function borrarNotificacion(id) {
   salvarDatos();
   renderAlertas();
   actualizarBadge();
-}
-
-function simularSosDeBrian() {
-  const yo = usuarioActual();
-  const grupo = gruposDe(yo.id)[0];
-  if (!grupo) { mostrarToast("Necesitas un grupo para la simulación.", "aviso"); return; }
-  const brian = usuarioPorId("u-brian");
-  const pos = vivo["u-brian"] || { lat: POSICION_BASE.lat + 0.01, lng: POSICION_BASE.lng - 0.01 };
-  agregarAlertaUnica({
-    id: nuevoId(), groupId: grupo.id, senderId: brian.id,
-    message: "Necesito ayuda en mi ubicación.",
-    lat: pos.lat, lng: pos.lng, status: "ACTIVE", sentAt: fechaISO()
-  });
-  agregarNotifUnica({
-    id: nuevoId(), userId: yo.id, type: "SOS", title: "SOS de Brian López",
-    body: "Envió una alerta desde el mapa.", read: false, createdAt: fechaISO()
-  });
-  salvarDatos();
-  renderAlertas();
-  actualizarBadge();
-  mostrarToast("SOS simulado generado.", "exito");
 }
 
 function actualizarBadge() {
@@ -1252,7 +1186,6 @@ function renderPerfil() {
         </svg>
       </div>
       <div class="texto-suave">NEXO v2.0 · HTML + CSS + JavaScript</div>
-      <div class="texto-suave">${MODO_NUBE ? "Base de datos: Supabase" : "Modo demostración (local)"}</div>
     </div>`;
   $("#contenidoPerfil").innerHTML = html;
 }
@@ -1309,7 +1242,7 @@ function verHistorial() {
           <strong>${fmtHora(p.t)}</strong>
           <div class="texto-suave">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>
         </div>
-        <button class="btn btn-secundario" onclick="cerrarModal(); abrirWaze(${p.lat}, ${p.lng})">Waze</button>
+        <button class="btn btn-waze" onclick="cerrarModal(); abrirWaze(${p.lat}, ${p.lng})">Waze</button>
       </div>`).join("");
   }
   abrirModal(`
@@ -1346,7 +1279,6 @@ function borrarCuentaConfirm() {
 function bindEvents() {
   $("#formLogin").addEventListener("submit", (e) => { e.preventDefault(); iniciarSesion(); });
   $("#formRegistro").addEventListener("submit", (e) => { e.preventDefault(); registrarUsuario(); });
-  $("#btnDemo").addEventListener("click", entrarDemo);
   $("#linkRegistro").addEventListener("click", (e) => {
     e.preventDefault();
     $("#vistaLogin").classList.add("oculta");
@@ -1361,7 +1293,7 @@ function bindEvents() {
   });
   $("#linkOlvide").addEventListener("click", (e) => {
     e.preventDefault();
-    mostrarToast(MODO_NUBE ? "Te enviamos un enlace a tu correo." : "En la demo usa la contraseña demo123", "aviso");
+    mostrarToast("Te enviamos un enlace a tu correo.", "aviso");
   });
   $$(".tab").forEach((t) => t.addEventListener("click", () => mostrarVista(t.dataset.vista)));
   $("#btnSos").addEventListener("click", abrirModalSos);
@@ -1372,9 +1304,6 @@ function bindEvents() {
 
 function iniciar() {
   bindEvents();
-  $("#modoNota").textContent = MODO_NUBE
-    ? "Conectado a la base de datos · Supabase"
-    : "Modo demostración · sin servidor";
 
   if (MODO_NUBE) {
     window.NUBE.cliente.auth.onAuthStateChange((evento, sesion) => {

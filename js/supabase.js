@@ -1,7 +1,7 @@
 // ============================================================
 // NEXO · Adaptador de base de datos en la nube (Supabase)
-// Si no hay credenciales configuradas, la app sigue funcionando
-// en modo demostración local.
+// Si no hay credenciales configuradas, la app usa cuentas locales
+// de prueba (localStorage).
 // ============================================================
 
 window.NUBE = (function () {

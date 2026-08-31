@@ -8,7 +8,7 @@
 //        [+ Project URL]  y  [+ anon public key]
 //   4) Pega ambos valores aquí abajo.
 //
-// Con estos campos vacíos la app corre en MODO DEMOSTRACIÓN
+// Con estos campos vacíos la app usa cuentas locales de prueba
 // (los datos viven en el navegador con localStorage).
 // ============================================================
 

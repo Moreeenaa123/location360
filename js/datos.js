@@ -1,12 +1,12 @@
 // ============================================================
-// NEXO · Datos locales (modo demostración)
+// NEXO · Datos locales (cuentas de prueba)
 // En modo nube (Supabase) estos datos son solo un espejo en la
-// memoria; en modo demo viven en el navegador con localStorage.
+// memoria; las cuentas locales de prueba viven en localStorage.
 // ============================================================
 
 const CLAVE_DB = "nexo_datos_v1";
 
-// Centro del mapa para la demostración (Buenos Aires, Argentina)
+// Centro del mapa (Buenos Aires, Argentina)
 const POSICION_BASE = { lat: -34.6037, lng: -58.3816 };
 
 function uuid() {
@@ -31,17 +31,17 @@ function datosSemilla() {
         phone: "+54 9 11 5555-0101", shareLocation: true, createdAt: ahora, points: []
       },
       {
-        id: "u-brian", name: "Brian López", email: "brian@demo.nexo.app", password: "demo123",
+        id: "u-brian", name: "Brian López", email: "brian@nexo.app", password: "demo123",
         phone: "+54 9 11 5555-0202", shareLocation: true, createdAt: ahora, points: []
       },
       {
-        id: "u-carla", name: "Carla Méndez", email: "carla@demo.nexo.app", password: "demo123",
+        id: "u-carla", name: "Carla Méndez", email: "carla@nexo.app", password: "demo123",
         phone: "+54 9 11 5555-0303", shareLocation: true, createdAt: ahora, points: []
       }
     ],
     groups: [
       {
-        id: "g-familia", name: "Familia", description: "El círculo de demostración",
+        id: "g-familia", name: "Familia", description: "Círculo de confianza",
         code: "NEXO1234", ownerId: "u-alicia", createdAt: ahora,
         members: [
           { userId: "u-alicia", role: "OWNER" },
@@ -53,11 +53,28 @@ function datosSemilla() {
     places: [
       {
         id: "p-casa", userId: "u-alicia", name: "Casa", category: "Hogar",
-        address: "Av. Corrientes 1234, CABA", lat: POSICION_BASE.lat + 0.004, lng: POSICION_BASE.lng - 0.003, createdAt: ahora
+        address: "Av. del Libertador 6480, Núñez, CABA",
+        lat: -34.5427, lng: -58.4498, createdAt: ahora
       },
       {
-        id: "p-trabajo", userId: "u-alicia", name: "Trabajo", category: "Trabajo",
-        address: "Av. 9 de Julio 5678, CABA", lat: POSICION_BASE.lat - 0.006, lng: POSICION_BASE.lng + 0.005, createdAt: ahora
+        id: "p-trabajo", userId: "u-alicia", name: "Oficina", category: "Trabajo",
+        address: "Av. Corrientes 1543, Balvanera, CABA",
+        lat: -34.6043, lng: -58.3915, createdAt: ahora
+      },
+      {
+        id: "p-casa-brian", userId: "u-brian", name: "Casa", category: "Hogar",
+        address: "Defensa 850, San Telmo, CABA",
+        lat: -34.6229, lng: -58.3722, createdAt: ahora
+      },
+      {
+        id: "p-casa-carla", userId: "u-carla", name: "Casa", category: "Hogar",
+        address: "Av. Scalabrini Ortiz 1450, Palermo, CABA",
+        lat: -34.5834, lng: -58.4273, createdAt: ahora
+      },
+      {
+        id: "p-cafe", userId: "u-carla", name: "Café favorito", category: "Café",
+        address: "Av. Córdoba 4521, Palermo, CABA",
+        lat: -34.5807, lng: -58.4302, createdAt: ahora
       }
     ],
     alerts: [],
@@ -78,7 +95,7 @@ function cargarAlmacen() {
 window.datos = cargarAlmacen();
 
 // En modo nube la fuente de verdad vive en Supabase: no conviene
-// pisar la demostración local ni guardar espejos parciales.
+// pisar las cuentas locales ni guardar espejos parciales.
 function salvarDatos() {
   if (window.NUBE && window.NUBE.activo) return;
   try {
