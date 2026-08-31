@@ -782,6 +782,31 @@ function leerCodigoInvitacion() {
   } catch (e) { return null; }
 }
 
+function leerGrupoInvitacion() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const payload = params.get("ingresar");
+    if (!payload) return null;
+    return decodificarGrupo(String(payload).trim());
+  } catch (e) { return null; }
+}
+
+function hayParametroInvitacion() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    return !!params.get("ingresar") || !!params.get("unirse");
+  } catch (e) { return false; }
+}
+
+function limpiarParametroInvitacion() {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.delete("ingresar");
+    url.searchParams.delete("unirse");
+    window.history.replaceState({}, "", url.toString());
+  } catch (e) { /* no crítico */ }
+}
+
 function busquedaLocalDeGrupo(codigo) {
   return datos.groups.find((g) => g.code.toUpperCase() === codigo) || null;
 }
@@ -811,20 +836,77 @@ async function resolverGrupoPorCodigo(codigo) {
 }
 
 async function procesarInvitacionEnlace() {
-  const code = leerCodigoInvitacion();
-  if (!code) return;
   const yo = usuarioActual();
   if (!yo) return;
+
+  // 1) Invitación con grupo completo embebido (QR/WhatsApp local)
+  const gInv = leerGrupoInvitacion();
+  if (gInv) {
+    await entrarAGrupoEmbebido(gInv, yo);
+    limpiarParametroInvitacion();
+    return;
+  }
+
+  // 2) Invitación por código
+  const code = leerCodigoInvitacion();
+  if (!code) { limpiarParametroInvitacion(); return; }
   const grupo = await resolverGrupoPorCodigo(code);
   if (!grupo) {
     mostrarToast("El enlace de invitación no es válido o el grupo no existe.", "error");
+    limpiarParametroInvitacion();
     return;
   }
   if (grupo.members.some((m) => m.userId === yo.id)) {
     mostrarToast("Ya formás parte de " + grupo.name + ".", "exito");
+    limpiarParametroInvitacion();
     return;
   }
   await unirseGrupoConCodigo(code);
+  limpiarParametroInvitacion();
+}
+
+// Recrea (si falta) el grupo que viene embebido en el enlace y une al usuario.
+// Registra en `datos.users` los perfiles que vienen embebidos en la
+// invitación para que los miembros del grupo se muestren con su nombre.
+function registrarPerfilesEmbebidos(gInv) {
+  if (!gInv.perfiles) return;
+  Object.keys(gInv.perfiles).forEach((pid) => {
+    if (pid === (usuarioActual() || {}).id) return;
+    if (datos.users.some((u) => u.id === pid)) return;
+    const p = gInv.perfiles[pid];
+    datos.users.push({
+      id: pid, name: p.n || "Miembro", email: "", password: "",
+      phone: p.t || "", shareLocation: !!p.c, createdAt: fechaISO(), points: []
+    });
+  });
+}
+
+async function entrarAGrupoEmbebido(gInv, yo) {
+  // Ya existe un grupo local con ese mismo código → unirse a él
+  const existente = datos.groups.find((x) => x.code.toUpperCase() === gInv.code.toUpperCase());
+  if (existente) {
+    registrarPerfilesEmbebidos(gInv);
+    if (!existente.members.some((m) => m.userId === yo.id)) {
+      existente.members.push({ userId: yo.id, role: "MEMBER" });
+      salvarDatos();
+      finalizarUnion(existente);
+    } else {
+      mostrarToast("Ya formás parte de " + existente.name + ".", "exito");
+    }
+    return;
+  }
+
+  // El grupo no existe en este dispositivo → recrearlo con todos sus miembros
+  registrarPerfilesEmbebidos(gInv);
+  gInv.id = nuevoId();
+  gInv.createdAt = fechaISO();
+  if (!gInv.members.some((m) => m.userId === yo.id)) {
+    gInv.members.push({ userId: yo.id, role: "MEMBER" });
+  }
+  datos.groups.push(gInv);
+  delete gInv.perfiles;
+  salvarDatos();
+  finalizarUnion(gInv);
 }
 
 async function unirseGrupoConCodigo(codigo) {
@@ -954,14 +1036,60 @@ function urlBaseApp() {
   }
 }
 
+function codificarGrupo(g) {
+  const perfiles = {};
+  g.members.forEach((m) => {
+    const u = usuarioPorId(m.userId);
+    if (u) perfiles[m.userId] = { n: u.name, t: u.phone || "", c: !!u.shareLocation };
+  });
+  const datosGrp = {
+    v: 1,
+    nombre: g.name,
+    desc: g.description || "",
+    code: g.code,
+    owner: g.ownerId,
+    members: g.members.map((m) => ({ id: m.userId, rol: m.role })),
+    perfiles: perfiles
+  };
+  const texto = JSON.stringify(datosGrp);
+  try {
+    return btoa(unescape(encodeURIComponent(texto))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  } catch (e) {
+    return encodeURIComponent(texto);
+  }
+}
+
+function decodificarGrupo(payload) {
+  try {
+    let texto;
+    if (payload.indexOf("%") !== -1) {
+      texto = decodeURIComponent(payload);
+    } else {
+      const b64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+      texto = decodeURIComponent(escape(atob(b64)));
+    }
+    const d = JSON.parse(texto);
+    if (!d || !d.code || !d.nombre || !d.owner) return null;
+    return {
+      id: null, name: d.nombre, description: d.desc || "", code: d.code, ownerId: d.owner,
+      createdAt: fechaISO(),
+      members: (d.members || []).map((m) => ({ userId: m.id, role: m.rol })),
+      perfiles: d.perfiles || null
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 function enlaceInvitacion(g) {
   const base = urlBaseApp();
-  return base + "?unirse=" + encodeURIComponent(g.code);
+  const payload = codificarGrupo(g);
+  return base + "?ingresar=" + payload;
 }
 
 function mensajeWhatsApp(g) {
   const base = urlBaseApp();
-  const url = base + "?unirse=" + encodeURIComponent(g.code);
+  const url = base + "?ingresar=" + codificarGrupo(g);
   return "Hola! Te invito a mi grupo " + g.name + " en NEXO para empezar a compartir la ubicación y estar más seguros. Abrí este enlace:\n" + url;
 }
 
