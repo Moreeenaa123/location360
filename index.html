@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>NEXO — Tu círculo, tu seguridad</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='20' cy='20' r='12' fill='%23F05454'/%3E%3Ccircle cx='44' cy='20' r='12' fill='%23D94646'/%3E%3Ccircle cx='32' cy='40' r='12' fill='%23F05454'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='20' cy='20' r='12' fill='%238B5CF6'/%3E%3Ccircle cx='44' cy='20' r='12' fill='%23582C83'/%3E%3Ccircle cx='32' cy='40' r='12' fill='%237E57C2'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="stylesheet" href="css/estilos.css">
 </head>
@@ -52,7 +52,7 @@
         </div>
         <p id="loginError" class="error-msg"></p>
 
-        <button type="submit" class="btn btn-primario btn-grueso btn-block">Iniciar sesión</button>
+        <button type="submit" id="btnLogin" class="btn btn-primario btn-grueso btn-block">Iniciar sesión</button>
       </form>
 
       <div class="divisor"><span>o entra como</span></div>
@@ -65,6 +65,7 @@
       </button>
 
       <p class="pie-auth">¿No tienes cuenta? <a href="#" id="linkRegistro">Créala aquí</a></p>
+      <p id="modoNota" class="modo-nota"></p>
     </div>
   </section>
 
@@ -108,7 +109,7 @@
         </div>
         <p id="regError" class="error-msg"></p>
 
-        <button type="submit" class="btn btn-primario btn-grueso btn-block">Crear cuenta</button>
+        <button type="submit" id="btnRegistro" class="btn btn-primario btn-grueso btn-block">Crear cuenta</button>
       </form>
 
       <p class="pie-auth">¿Ya tienes cuenta? <a href="#" id="linkLogin">Inicia sesión</a></p>
@@ -121,9 +122,9 @@
     <header class="cabecera">
       <div class="cabecera-izq">
         <svg class="logo-nudo logo-mini" viewBox="0 0 64 64" aria-hidden="true">
-          <circle cx="20" cy="20" r="12" fill="#F05454"/>
-          <circle cx="44" cy="20" r="12" fill="#D94646"/>
-          <circle cx="32" cy="40" r="12" fill="#F05454"/>
+          <circle cx="20" cy="20" r="12" fill="#8B5CF6"/>
+          <circle cx="44" cy="20" r="12" fill="#582C83"/>
+          <circle cx="32" cy="40" r="12" fill="#7E57C2"/>
         </svg>
         <span id="textoCabecera">Mapa</span>
       </div>
@@ -202,8 +203,16 @@
   <div id="modal" class="modal oculta"></div>
   <div id="toast" class="toast oculta"></div>
 
+  <div id="cargando" class="cargando oculta">
+    <div class="spinner"></div>
+    <p>Conectando con tu círculo…</p>
+  </div>
+
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="js/config.js"></script>
   <script src="js/datos.js"></script>
+  <script src="js/supabase.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

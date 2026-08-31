@@ -1,140 +1,87 @@
-const CLAVE_DB = "location360_db_v1";
+// ============================================================
+// NEXO · Datos locales (modo demostración)
+// En modo nube (Supabase) estos datos son solo un espejo en la
+// memoria; en modo demo viven en el navegador con localStorage.
+// ============================================================
 
-const POSICION_BASE = { lat: 40.4168, lng: -3.7038 };
+const CLAVE_DB = "nexo_datos_v1";
+
+// Centro del mapa para la demostración (Buenos Aires, Argentina)
+const POSICION_BASE = { lat: -34.6037, lng: -58.3816 };
 
 function uuid() {
-  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
 }
 
 function fechaISO() {
   return new Date().toISOString();
 }
 
-function cargarDatos() {
-  try {
-    const crudo = localStorage.getItem(CLAVE_DB);
-    return crudo ? JSON.parse(crudo) : semillar();
-  } catch (e) {
-    return semillar();
-  }
-}
-
-function salvarDatos() {
-  try {
-    localStorage.setItem(CLAVE_DB, JSON.stringify(datos));
-  } catch (e) {
-    console.error("No se pudo guardar", e);
-  }
-}
-
-function semillar() {
+function datosSemilla() {
   const ahora = fechaISO();
   return {
-    version: 1,
     users: [
       {
-        id: "u-alicia",
-        name: "Alicia García",
-        email: "alicia@nexo.app",
-        password: "demo123",
-        phone: "555 010 2828",
-        shareLocation: false,
-        createdAt: ahora,
-        points: []
+        id: "u-alicia", name: "Alicia García", email: "alicia@nexo.app", password: "demo123",
+        phone: "+54 9 11 5555-0101", shareLocation: true, createdAt: ahora, points: []
       },
       {
-        id: "u-brian",
-        name: "Brian López",
-        email: "brian@nexo.app",
-        password: "demo123",
-        phone: "",
-        shareLocation: true,
-        createdAt: ahora,
-        points: []
+        id: "u-brian", name: "Brian López", email: "brian@demo.nexo.app", password: "demo123",
+        phone: "+54 9 11 5555-0202", shareLocation: true, createdAt: ahora, points: []
       },
       {
-        id: "u-carla",
-        name: "Carla Ruiz",
-        email: "carla@nexo.app",
-        password: "demo123",
-        phone: "",
-        shareLocation: true,
-        createdAt: ahora,
-        points: []
+        id: "u-carla", name: "Carla Méndez", email: "carla@demo.nexo.app", password: "demo123",
+        phone: "+54 9 11 5555-0303", shareLocation: true, createdAt: ahora, points: []
       }
     ],
-    sessionUserId: null,
     groups: [
       {
-        id: "g-familia",
-        name: "Familia",
-        description: "Nuestro círculo seguro",
-        code: "NEXO1234",
-        ownerId: "u-alicia",
-        createdAt: ahora,
+        id: "g-familia", name: "Familia", description: "El círculo de demostración",
+        code: "NEXO1234", ownerId: "u-alicia", createdAt: ahora,
         members: [
           { userId: "u-alicia", role: "OWNER" },
-          { userId: "u-brian", role: "ADMIN" },
+          { userId: "u-brian", role: "MEMBER" },
           { userId: "u-carla", role: "MEMBER" }
         ]
       }
     ],
     places: [
       {
-        id: "p-casa",
-        userId: "u-alicia",
-        name: "Casa",
-        category: "Casa",
-        address: "Calle Principal 123",
-        lat: 40.4168,
-        lng: -3.7038,
-        createdAt: ahora
+        id: "p-casa", userId: "u-alicia", name: "Casa", category: "Hogar",
+        address: "Av. Corrientes 1234, CABA", lat: POSICION_BASE.lat + 0.004, lng: POSICION_BASE.lng - 0.003, createdAt: ahora
       },
       {
-        id: "p-trabajo",
-        userId: "u-alicia",
-        name: "Trabajo",
-        category: "Trabajo",
-        address: "Av. Central 45",
-        lat: 40.428,
-        lng: -3.7038,
-        createdAt: ahora
+        id: "p-trabajo", userId: "u-alicia", name: "Trabajo", category: "Trabajo",
+        address: "Av. 9 de Julio 5678, CABA", lat: POSICION_BASE.lat - 0.006, lng: POSICION_BASE.lng + 0.005, createdAt: ahora
       }
     ],
-    alerts: [
-      {
-        id: "a-bien",
-        groupId: "g-familia",
-        senderId: "u-brian",
-        message: "Todo en orden, llegué bien.",
-        lat: 40.424,
-        lng: -3.692,
-        status: "RESOLVED",
-        sentAt: ahora,
-        resolvedAt: ahora
-      }
-    ],
-    notifications: [
-      {
-        id: "n-bien",
-        userId: "u-alicia",
-        type: "SOS",
-        title: "SOS activado",
-        body: "Brian envió una alerta desde el mapa.",
-        read: true,
-        createdAt: ahora
-      },
-      {
-        id: "n-bienvenida",
-        userId: "u-alicia",
-        type: "WELCOME",
-        title: "Bienvenida a NEXO",
-        body: "Tu círculo «Familia» te está esperando.",
-        read: false,
-        createdAt: ahora
-      }
-    ]
+    alerts: [],
+    notifications: [],
+    sessionUserId: null
   };
 }
 
-let datos = cargarDatos();
+function cargarAlmacen() {
+  try {
+    const cruda = localStorage.getItem(CLAVE_DB);
+    const guardado = cruda ? JSON.parse(cruda) : null;
+    if (guardado && Array.isArray(guardado.users) && Array.isArray(guardado.groups)) return guardado;
+  } catch (e) { /* almacén corrupto: se vuelve a sembrar */ }
+  return datosSemilla();
+}
+
+window.datos = cargarAlmacen();
+
+// En modo nube la fuente de verdad vive en Supabase: no conviene
+// pisar la demostración local ni guardar espejos parciales.
+function salvarDatos() {
+  if (window.NUBE && window.NUBE.activo) return;
+  try {
+    localStorage.setItem(CLAVE_DB, JSON.stringify(window.datos));
+  } catch (e) { /* sin espacio o modo privado: la sesión sigue en memoria */ }
+}

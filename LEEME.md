@@ -1,54 +1,64 @@
-# NEXO — Tu círculo, tu seguridad
+# NEXO · Tu círculo, tu seguridad
 
-Aplicación web de localización y seguridad familiar, hecha **solo con HTML, CSS y JavaScript** (sin frameworks ni librerías propias). El mapa usa **Leaflet + OpenStreetMap** y los datos se guardan en el navegador (localStorage).
+Aplicación web estilo Life360 creada **solo con HTML, CSS y JavaScript** (sin frameworks). Muestra a tu círculo en un mapa en vivo, permite crear grupos, lugares, alertas SOS y notificaciones.
 
-## Cómo ejecutarla
+- **Modo demo (por defecto):** funciona sin servidor; los datos viven en `localStorage`.
+- **Modo nube:** usa **Supabase** para usuarios reales, compartir la ubicación en vivo y tiempo real entre dispositivos.
 
-1. Abre `index.html` con doble clic (Chrome, Edge o Firefox). La app funciona perfecto así.
-2. Para que el botón **GPS** funcione con tu posición real, es mejor servirla como página web:
-   - Con Python: `python -m http.server 8080` y abre `http://localhost:8080`
-   - Con Node: `npx serve`
-   - O súbela a GitHub Pages / Vercel / Netlify.
+## Archivos del proyecto (8)
 
-> Abrir desde `file://` o en páginas sin `https` puede bloquear el acceso al GPS; la app lo detecta y usa una posición simulada para que la presentación nunca se quede vacía.
+| Archivo | Descripción |
+| --- | --- |
+| `index.html` | Estructura completa (login, registro, mapa, pestañas). |
+| `css/estilos.css` | Diseño profesional inspirado en Life360 (paleta violeta). |
+| `js/config.js` | Aquí se pegan las credenciales de Supabase (vacías = modo demo). |
+| `js/datos.js` | Datos locales del modo demo + fallback/seed y persistencia. |
+| `js/supabase.js` | Adaptador de base de datos (auth, consultas, tiempo real). |
+| `js/app.js` | Toda la lógica de la aplicación (mapa, grupos, SOS, perfil). |
+| `supabase/esquema.sql` | Esquema de la base de datos para ejecutar en Supabase. |
+| `LEEME.md` | Este archivo. |
 
-## Cuenta de demostración
+## Cómo abrir la app
 
-En la pantalla de ingreso usa el botón **"Probar con la cuenta de demostración"** (Alicia García) o entra con:
+1. Abre `index.html` en un navegador (doble clic) o,
+2. súbela a GitHub y actívala con **GitHub Pages** → *Settings → Pages*, rama `main`, carpeta `/ (root)`.
 
-- **Correo:** `alicia@nexo.app`
-- **Contraseña:** `demo123`
+> Para probarla sin registrarse: botón **"Cuenta de demostración"** (Alicia García). También puedes entrar con `alicia@nexo.app` / `demo123`.
 
-También existen `brian@nexo.app` y `carla@nexo.app` (misma clave), miembros del grupo **Familia** (código `NEXO1234`).
+## Activar la base de datos (Supabase, opcional)
+
+1. Crea una cuenta gratis en https://supabase.com y un nuevo proyecto.
+2. En **SQL Editor**, pega y ejecuta el contenido de `supabase/esquema.sql` (crea las tablas, la política de seguridad RLS y el trigger que crea el perfil al registrarse).
+3. Opcional, más cómodo para pruebas: en **Authentication → Providers → Email**, desactiva *"Confirm email"*.
+4. Ve a **Project Settings → API** y copia el *Project URL* y la *anon public key*.
+5. Pégalos en `js/config.js`:
+
+```js
+window.NEXO_CONFIG = {
+  supabaseUrl: "https://TU-PROYECTO.supabase.co",
+  supabaseAnonKey: "TU-ANON-KEY"
+};
+```
+
+6. Recarga `index.html`. Ahora el registro crea usuarios reales y el primer usuario recibe automáticamente el grupo *Familia* (código `NEXO1234`). Abre la app en dos navegadores para ver el tiempo real.
 
 ## Características
 
-- Círculo (grupo) con creación, código de invitación, roles (líder / co-líder / miembro) y administración de miembros.
-- Mapa en vivo con la ubicación de los miembros que comparten su posición. Los miembros simulados se mueven levemente para mostrar el mapa activo.
-- **Privacidad real de demostración**: cada usuario decide si comparte o no su ubicación (Carla no la comparte por defecto).
-- Alerta **SOS** con posición y mensaje, que aparece en "Alertas" del resto del grupo.
-- **Lugares** guardados con posición tomada del mapa y navegación con Waze.
-- **Historial de ubicación** personal, con opción de borrarlo.
-- Notificaciones con contador de no leídas, cerrar sesión y borrar cuenta.
+- Login y registro con diseño tipo Life360 (fondo con burbujas, sello NEXO).
+- Mapa oscuro con la ubicación de cada miembro (colores fijos por persona).
+- Grupos con código de invitación, roles (Líder / Co-líder / Miembro).
+- Lugares guardados y enlaces a Waze para navegar.
+- Botón **SOS** con alerta a todo el círculo e historial.
+- Notificaciones con contador de no leídas.
+- En modo demo hay un movimiento simulado para ver la app funcionando sin GPS.
 
-## Estructura del proyecto
+## Tecnologías
 
-El repositorio completo tiene solo **5 archivos**, todos en HTML, CSS y JavaScript:
+- HTML5, CSS3, JavaScript puro.
+- [Leaflet](https://leafletjs.com/) para el mapa + tiles oscuros de Esri.
+- [Supabase](https://supabase.com) (PostgreSQL + Auth + Realtime).
+- Tipografía **Plus Jakarta Sans** de Google Fonts.
 
-| Archivo | Contenido |
-|---|---|
-| `index.html` | Estructura de las pantallas (ingreso, app, modales) |
-| `css/estilos.css` | Todo el diseño y estilos de la interfaz |
-| `js/datos.js` | Datos de ejemplo, persistencia en localStorage y utilidades |
-| `js/app.js` | Lógica completa: sesión, mapa, grupos, lugares, alertas y perfil |
-| `LEEME.md` | Este manual |
+---
 
-## Librerías externas
-
-- **Leaflet 1.9.4** (CDN `unpkg.com`) para el mapa.
-- **OpenStreetMap** para las capas de mapa (sin API key).
-- Iconos e identidad visual: 100% SVG/HTML/CSS propios.
-
-## Nota académica
-
-Es una versión de demostración: los miembros y sus movimientos son **simulados en el navegador** y las contraseñas se guardan sin cifrar, suficiente para un proyecto de prácticas. La versión productiva usaría un servidor para sincronizar usuarios reales en tiempo real.
+> La versión full-stack original (servidor Node/TypeScript + app móvil React Native) se conserva completa por separado en la carpeta `Documents\Default Project`.

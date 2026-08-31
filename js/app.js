@@ -1,13 +1,25 @@
 // =====================================================================
 // NEXO · Tu círculo, tu seguridad
-// Single Page Application hecha en JavaScript puro (sin frameworks)
-// Mapa: Leaflet + OpenStreetMap · Datos: localStorage
+// JavaScript puro (sin frameworks). Dos modos:
+//   - NUBE:   base de datos Supabase (usuarios reales + tiempo real)
+//   - DEMO:   sin servidor, datos locales en localStorage
+// Mapa: Leaflet + OpenStreetMap oscuro · Estilo inspirado en Life360
 // =====================================================================
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 const INTERVALO_SIMULACION = 4000;
+const INTERVALO_REPORTE_UBICACION = 5000;
+
+const URL_MAPA = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}";
+
+const MODO_NUBE = !!(window.NUBE && window.NUBE.activo);
+
+const CUENTA_DEMO = { nombre: "Alicia García", correo: "alicia@nexo.app", clave: "demo123" };
+
+// Colores fijos por miembro (estilo Life360)
+const COLORES_MIEMBRO = ["#F2A33C", "#2DD4BF", "#F472B6", "#60A5FA", "#FB7185", "#A3E635", "#38BDF8"];
 
 let mapa = null;
 let mapaPicker = null;
@@ -18,9 +30,11 @@ let miPos = null;
 let usandoSimulacion = false;
 let watchId = null;
 let intervaloTiempo = null;
+let intervaloReporte = null;
 let fichaAbiertaId = null;
 let grupoDetalleId = null;
 let toastTimer = null;
+let entrandoNube = false;
 
 // ============================ UTILIDADES ============================
 
@@ -34,6 +48,20 @@ function iniciales(nombre) {
   const partes = String(nombre || "?").trim().split(/\s+/);
   const letras = (partes[0] ? partes[0][0] : "") + (partes[1] ? partes[1][0] : "");
   return letras.toUpperCase() || "?";
+}
+
+function hashColor(cadena) {
+  let h = 0;
+  for (const ch of String(cadena)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return COLORES_MIEMBRO[h % COLORES_MIEMBRO.length];
+}
+
+function colorDe(userId) {
+  return hashColor(userId);
+}
+
+function nuevoId() {
+  return window.NUBE ? window.NUBE.nuevoId() : uuid();
 }
 
 function fmtAgo(iso) {
@@ -65,7 +93,11 @@ function mostrarToast(mensaje, tipo) {
   t.className = "toast " + (tipo || "");
   t.classList.remove("oculta");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.add("oculta"), 2800);
+  toastTimer = setTimeout(() => t.classList.add("oculta"), 3000);
+}
+
+function setCargando(activo) {
+  $("#cargando").classList.toggle("oculta", !activo);
 }
 
 function abrirModal(html) {
@@ -80,17 +112,59 @@ function cerrarModal() {
   if (mapaPicker) { mapaPicker.remove(); mapaPicker = null; pickerMarker = null; }
 }
 
-// ============================ ACCESO ============================
+// ============================ DATOS ============================
 
 function usuarioActual() {
   return datos.users.find((u) => u.id === datos.sessionUserId) || null;
 }
 
-function entrarComo(userId) {
-  datos.sessionUserId = userId;
-  salvarDatos();
-  entrarApp();
+function usuarioPorId(id) { return datos.users.find((u) => u.id === id); }
+function grupoPorId(id) { return datos.groups.find((g) => g.id === id); }
+
+function gruposDe(userId) { return datos.groups.filter((g) => g.members.some((m) => m.userId === userId)); }
+
+function miembrosDe(userId) {
+  const lista = [];
+  gruposDe(userId).forEach((g) => g.members.forEach((m) => {
+    if (!lista.find((x) => x.userId === m.userId)) lista.push(m);
+  }));
+  return lista;
 }
+
+function miembrosDelGrupo(gid) {
+  const g = grupoPorId(gid);
+  return g ? g.members : [];
+}
+
+function rolEnGrupo(gid, userId) {
+  const g = grupoPorId(gid);
+  const m = g && g.members.find((x) => x.userId === userId);
+  return m ? m.role : null;
+}
+
+const ROL_LABEL = { OWNER: "Líder", ADMIN: "Co-líder", MEMBER: "Miembro" };
+
+function esDeMiGrupo(alerta) {
+  const yo = usuarioActual();
+  return yo && gruposDe(yo.id).some((g) => g.id === alerta.groupId);
+}
+
+function agregarAlertaUnica(a) {
+  if (!datos.alerts.some((x) => x.id === a.id)) datos.alerts.push(a);
+}
+
+function agregarNotifUnica(n) {
+  if (!datos.notifications.some((x) => x.id === n.id)) datos.notifications.push(n);
+}
+
+function generarCodigo() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let code = "NEXO";
+  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  return code;
+}
+
+// ============================ ACCESO ============================
 
 function entrarApp() {
   $("#vistaLogin").classList.add("oculta");
@@ -100,40 +174,157 @@ function entrarApp() {
   $("#textoEnVivo").textContent = u ? u.name : "en vivo";
   mostrarVista("mapa");
   iniciarMapa();
-  arrancarSimulacion();
+  if (!MODO_NUBE) arrancarSimulacion();
   actualizarBadge();
 }
 
-function salirApp() {
-  if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-  if (intervaloTiempo) { clearInterval(intervaloTiempo); intervaloTiempo = null; }
-  if (mapa) { mapa.remove(); mapa = null; }
-  marcadores = {}; vivo = {}; miPos = null; usandoSimulacion = false; fichaAbiertaId = null;
-  datos.sessionUserId = null;
-  salvarDatos();
+function limpiarSesionUI() {
+  if ($("#app").classList.contains("oculta")) return;
   $("#app").classList.add("oculta");
   $("#vistaLogin").classList.remove("oculta");
   $("#loginError").textContent = "";
   $("#vistaRegistro").classList.add("oculta");
 }
 
+function salirApp() {
+  if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  if (intervaloTiempo) { clearInterval(intervaloTiempo); intervaloTiempo = null; }
+  if (intervaloReporte) { clearInterval(intervaloReporte); intervaloReporte = null; }
+  if (mapa) { mapa.remove(); mapa = null; }
+  marcadores = {}; vivo = {}; miPos = null; usandoSimulacion = false; fichaAbiertaId = null;
+  datos.sessionUserId = null;
+  salvarDatos();
+  if (MODO_NUBE) {
+    window.NUBE.desconectarEnVivo();
+    window.NUBE.cerrarSesion().catch(() => {});
+  }
+  limpiarSesionUI();
+}
+
+function entrarComo(userId) {
+  datos.sessionUserId = userId;
+  salvarDatos();
+  entrarApp();
+}
+
+async function entrarAppNube(user) {
+  if (entrandoNube) return;
+  entrandoNube = true;
+  setCargando(true);
+  try {
+    const t = await window.NUBE.cargarTodo();
+    const uid = user.id;
+    const esPrimero = t.perfiles.length === 1;
+
+    datos.users = t.perfiles.map((p) => ({
+      id: p.id,
+      name: p.nombre || "Usuario",
+      email: p.id === uid ? user.email : "",
+      phone: p.telefono || "",
+      shareLocation: !!p.share_ubicacion,
+      createdAt: p.created_at,
+      points: []
+    }));
+
+    Object.keys(vivo).forEach((k) => delete vivo[k]);
+    t.ubicaciones.forEach((u) => {
+      vivo[u.usuario_id] = { lat: u.lat, lng: u.lng, lastAt: u.updated_at || fechaISO() };
+    });
+
+    datos.groups = t.grupos.map((g) => ({
+      id: g.id, name: g.nombre, description: g.descripcion, code: g.codigo,
+      ownerId: g.propietario_id, createdAt: g.created_at,
+      members: t.miembros.filter((m) => m.grupo_id === g.id).map((m) => ({ userId: m.usuario_id, role: m.rol }))
+    }));
+
+    datos.places = t.lugares.map((p) => ({
+      id: p.id, userId: p.usuario_id, name: p.nombre, category: p.categoria,
+      address: p.direccion, lat: p.lat, lng: p.lng, createdAt: p.created_at
+    }));
+
+    datos.alerts = t.alertas.map((a) => ({
+      id: a.id, groupId: a.grupo_id, senderId: a.emisor_id, message: a.mensaje,
+      lat: a.lat, lng: a.lng, status: a.estado, sentAt: a.creada_en, resolvedAt: a.resuelta_en
+    }));
+
+    datos.notifications = t.notificaciones
+      .filter((n) => n.usuario_id === uid)
+      .map((n) => ({
+        id: n.id, userId: n.usuario_id, type: n.tipo, title: n.titulo,
+        body: n.cuerpo, read: !!n.leida, createdAt: n.created_at
+      }));
+
+    datos.sessionUserId = uid;
+
+    if (esPrimero) await crearGrupoFamilia(uid);
+
+    salvarDatos();
+    entrarApp();
+    window.NUBE.conectarEnVivo(manejarCambioEnVivo);
+    iniciarReporteNube();
+  } catch (e) {
+    mostrarToast(e.message || "No se pudo conectar con la nube.", "error");
+  } finally {
+    setCargando(false);
+    entrandoNube = false;
+  }
+}
+
+async function crearGrupoFamilia(uid) {
+  if (gruposDe(uid).some((g) => g.code === "NEXO1234")) return;
+  const grupo = {
+    id: nuevoId(), name: "Familia", description: "El círculo de demostración",
+    code: "NEXO1234", ownerId: uid, createdAt: fechaISO(),
+    members: [{ userId: uid, role: "OWNER" }]
+  };
+  try {
+    await window.NUBE.insert("grupos", { id: grupo.id, nombre: grupo.name, descripcion: grupo.description, codigo: grupo.code, propietario_id: uid });
+    await window.NUBE.insert("miembros", { grupo_id: grupo.id, usuario_id: uid, rol: "OWNER" });
+    datos.groups.push(grupo);
+  } catch (e) { /* si falla, avanza sin el grupo semilla */ }
+}
+
 function iniciarSesion() {
+  const errorEl = $("#loginError");
+  errorEl.textContent = "";
   const correo = $("#loginCorreo").value.trim().toLowerCase();
   const clave = $("#loginContrasena").value;
+  if (MODO_NUBE) {
+    setCargando(true);
+    window.NUBE.inicioSesion(correo, clave)
+      .catch((e) => { errorEl.textContent = e.message; })
+      .finally(() => setCargando(false));
+    return;
+  }
   const u = datos.users.find((x) => x.email === correo && x.password === clave);
-  if (!u) { $("#loginError").textContent = "Correo o contraseña incorrectos."; return; }
+  if (!u) { errorEl.textContent = "Correo o contraseña incorrectos."; return; }
   entrarComo(u.id);
 }
 
 function registrarUsuario() {
+  const errorEl = $("#regError");
+  errorEl.textContent = "";
   const nombre = $("#regNombre").value.trim();
   const correo = $("#regCorreo").value.trim().toLowerCase();
   const clave = $("#regContrasena").value;
-  $("#regError").textContent = "";
-  if (!nombre) { $("#regError").textContent = "Escribe tu nombre."; return; }
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) { $("#regError").textContent = "Correo no válido."; return; }
-  if (clave.length < 6) { $("#regError").textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
-  if (datos.users.some((x) => x.email === correo)) { $("#regError").textContent = "Ese correo ya está registrado."; return; }
+  if (!nombre) { errorEl.textContent = "Escribe tu nombre."; return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) { errorEl.textContent = "Correo no válido."; return; }
+  if (clave.length < 6) { errorEl.textContent = "La contraseña debe tener al menos 6 caracteres."; return; }
+  if (MODO_NUBE) {
+    setCargando(true);
+    window.NUBE.registro(nombre, correo, clave)
+      .then((sesionIniciada) => {
+        if (!sesionIniciada) {
+          mostrarToast("Revisa tu correo para confirmar la cuenta.", "aviso");
+          $("#vistaRegistro").classList.add("oculta");
+          $("#vistaLogin").classList.remove("oculta");
+        }
+      })
+      .catch((e) => { errorEl.textContent = e.message; })
+      .finally(() => setCargando(false));
+    return;
+  }
+  if (datos.users.some((x) => x.email === correo)) { errorEl.textContent = "Ese correo ya está registrado."; return; }
   datos.users.push({
     id: uuid(), name: nombre, email: correo, password: clave,
     phone: "", shareLocation: false, createdAt: fechaISO(), points: []
@@ -141,6 +332,19 @@ function registrarUsuario() {
   salvarDatos();
   entrarComo(datos.users[datos.users.length - 1].id);
   mostrarToast("Cuenta creada. ¡Bienvenido a NEXO!", "exito");
+}
+
+function entrarDemo() {
+  if (MODO_NUBE) {
+    setCargando(true);
+    window.NUBE.inicioSesion(CUENTA_DEMO.correo, CUENTA_DEMO.clave)
+      .catch(() => window.NUBE.registro(CUENTA_DEMO.nombre, CUENTA_DEMO.correo, CUENTA_DEMO.clave))
+      .then(() => window.NUBE.inicioSesion(CUENTA_DEMO.correo, CUENTA_DEMO.clave))
+      .catch((e) => mostrarToast(e.message, "error"))
+      .finally(() => setCargando(false));
+    return;
+  }
+  entrarComo("u-alicia");
 }
 
 // ============================ NAVEGACION ============================
@@ -169,9 +373,9 @@ function mostrarVista(vista) {
 function iniciarMapa() {
   if (typeof L === "undefined") { mostrarToast("Sin red: no se pudo cargar el mapa.", "error"); return; }
   mapa = L.map("mapa").setView([POSICION_BASE.lat, POSICION_BASE.lng], 13);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+  L.tileLayer(URL_MAPA, {
+    maxZoom: 18,
+    attribution: 'Tiles &copy; Esri &mdash; Fuente: Esri. Pines NEXO'
   }).addTo(mapa);
   const yo = usuarioActual();
   if (yo.shareLocation) comenzarMiUbicacion();
@@ -195,7 +399,7 @@ function usarPosicionPorDefecto() {
     POSICION_BASE.lat + (Math.random() - 0.5) * 0.02,
     POSICION_BASE.lng + (Math.random() - 0.5) * 0.02
   );
-  mostrarToast("GPS no disponible: se usa una posición simulada.", "aviso");
+  mostrarToast("GPS no disponible: se usa una posición simula.", "aviso");
 }
 
 function fijarPosicionMia(lat, lng) {
@@ -221,9 +425,9 @@ function crearMarca(userId, nombre, esYo) {
     : [vivo[userId].lat, vivo[userId].lng];
   const icono = L.divIcon({
     className: "",
-    html: `<div class="marca ${esYo ? "marca-mia" : "marca-miembro"}">${iniciales(nombre)}</div>`,
-    iconSize: [34, 34],
-    iconAnchor: [17, 17]
+    html: `<div class="marca ${esYo ? "marca-mia" : "marca-miembro"}" style="background:${colorDe(userId)}">${iniciales(nombre)}</div>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18]
   });
   const m = L.marker(latlng, { icon: icono }).addTo(mapa);
   m.on("click", () => abrirFicha(userId));
@@ -281,14 +485,25 @@ function centrarEnMi() {
   });
 }
 
-// Movimiento simulado de los miembros con ubicación visible,
-// para que el mapa se vea "en vivo" durante la presentación.
+function iniciarReporteNube() {
+  if (!MODO_NUBE) return;
+  if (intervaloReporte) clearInterval(intervaloReporte);
+  intervaloReporte = setInterval(() => {
+    const yo = usuarioActual();
+    if (yo && yo.shareLocation && miPos) {
+      window.NUBE.reportarUbicacion(yo.id, miPos.lat, miPos.lng).catch(() => {});
+    }
+  }, INTERVALO_REPORTE_UBICACION);
+}
+
+// Movimiento simulado (solo en modo demostración)
 function arrancarSimulacion() {
   if (intervaloTiempo) clearInterval(intervaloTiempo);
   intervaloTiempo = setInterval(moverMiembros, INTERVALO_SIMULACION);
 }
 
 function moverMiembros() {
+  if (MODO_NUBE) return;
   const yo = usuarioActual();
   if (!yo || !mapa) return;
   miembrosDe(yo.id).forEach((mm) => {
@@ -307,6 +522,84 @@ function moverMiembros() {
     if (marcadores["yo"]) marcadores["yo"].setLatLng([miPos.lat, miPos.lng]);
   }
   renderFichaSiAbierta();
+}
+
+// ============================ TIEMPO REAL (SUPABASE) ============================
+
+function manejarCambioEnVivo(ev) {
+  const yo = usuarioActual();
+  if (!yo) return;
+  if (ev.tipo === "ubicacion") {
+    const d = ev.dato;
+    if (!d || d.usuario_id === yo.id) return;
+    if (miembrosDe(yo.id).some((m) => m.userId === d.usuario_id)) {
+      vivo[d.usuario_id] = { lat: d.lat, lng: d.lng, lastAt: d.updated_at || fechaISO() };
+      if (vistaActual === "mapa" && mapa) actualizarMarcadores();
+      if (fichaAbiertaId === d.usuario_id) renderFicha();
+    }
+  } else if (ev.tipo === "sos") {
+    const a = ev.dato;
+    if (!a) return;
+    if (esDeMiGrupo({ groupId: a.grupo_id })) {
+      agregarAlertaUnica({
+        id: a.id, groupId: a.grupo_id, senderId: a.emisor_id, message: a.mensaje,
+        lat: a.lat, lng: a.lng, status: a.estado, sentAt: a.creada_en, resolvedAt: a.resuelta_en
+      });
+      salvarDatos();
+      const emisor = usuarioPorId(a.emisor_id);
+      mostrarToast("SOS de " + (emisor ? emisor.name : "un miembro"), "error");
+      if (vistaActual === "alertas") renderAlertas();
+      actualizarBadge();
+    }
+  } else if (ev.tipo === "notificacion") {
+    const n = ev.dato;
+    if (n && n.usuario_id === yo.id) {
+      agregarNotifUnica({
+        id: n.id, userId: n.usuario_id, type: n.tipo, title: n.titulo,
+        body: n.cuerpo, read: !!n.leida, createdAt: n.created_at
+      });
+      salvarDatos();
+      if (vistaActual === "alertas") renderAlertas();
+      actualizarBadge();
+    }
+  } else if (ev.tipo === "miembro") {
+    sincronizarNube();
+  }
+}
+
+async function sincronizarNube() {
+  if (!MODO_NUBE) return;
+  try {
+    const t = await window.NUBE.cargarTodo();
+    const yo = usuarioActual();
+    if (!yo) return;
+    datos.groups = t.grupos.map((g) => ({
+      id: g.id, name: g.nombre, description: g.descripcion, code: g.codigo,
+      ownerId: g.propietario_id, createdAt: g.created_at,
+      members: t.miembros.filter((m) => m.grupo_id === g.id).map((m) => ({ userId: m.usuario_id, role: m.rol }))
+    }));
+    datos.places = t.lugares.map((p) => ({
+      id: p.id, userId: p.usuario_id, name: p.nombre, category: p.categoria,
+      address: p.direccion, lat: p.lat, lng: p.lng, createdAt: p.created_at
+    }));
+    datos.alerts = t.alertas.map((a) => ({
+      id: a.id, groupId: a.grupo_id, senderId: a.emisor_id, message: a.mensaje,
+      lat: a.lat, lng: a.lng, status: a.estado, sentAt: a.creada_en, resolvedAt: a.resuelta_en
+    }));
+    datos.notifications = t.notificaciones
+      .filter((n) => n.usuario_id === yo.id)
+      .map((n) => ({
+        id: n.id, userId: n.usuario_id, type: n.tipo, title: n.titulo,
+        body: n.cuerpo, read: !!n.leida, createdAt: n.created_at
+      }));
+    salvarDatos();
+    if (vistaActual === "mapa") actualizarMarcadores();
+    if (vistaActual === "grupo") grupoDetalleId ? verDetalleGrupo(grupoDetalleId) : renderGrupos();
+    if (vistaActual === "lugares") renderLugares();
+    if (vistaActual === "alertas") renderAlertas();
+    if (vistaActual === "perfil") renderPerfil();
+    actualizarBadge();
+  } catch (e) { /* silencioso */ }
 }
 
 // ============================ FICHA DE MIEMBRO ============================
@@ -328,7 +621,7 @@ function renderFicha() {
   const estado = pos ? ("Visto " + fmtAgo(pos.lastAt || u.createdAt) + " · " + lat.toFixed(5) + ", " + lng.toFixed(5)) : "No comparte ubicación";
   el.innerHTML = `
     <div class="tarjeta-fila">
-      <div class="avatar-miembro">${iniciales(u.name)}</div>
+      <div class="avatar-miembro" style="background:${colorDe(u.id)}">${iniciales(u.name)}</div>
       <div style="flex:1">
         <strong>${esc(u.name)}</strong>
         <div class="texto-suave">${estado}</div>
@@ -388,60 +681,52 @@ function enviarSos() {
   const pos = miPos || vivo[yo.id] || null;
   const lat = pos ? pos.lat : POSICION_BASE.lat;
   const lng = pos ? pos.lng : POSICION_BASE.lng;
-  datos.alerts.push({
-    id: uuid(), groupId: gid, senderId: yo.id,
+  const alerta = {
+    id: nuevoId(), groupId: gid, senderId: yo.id,
     message: $("#sosMensaje").value.trim() || "Necesito ayuda",
     lat, lng, status: "ACTIVE", sentAt: fechaISO()
-  });
-  miembrosDelGrupo(gid).forEach((mm) => {
-    if (mm.userId === yo.id) return;
-    datos.notifications.push({
-      id: uuid(), userId: mm.userId, type: "SOS",
-      title: "SOS de " + yo.name,
-      body: "Envió una alerta desde el mapa.",
-      read: false, createdAt: fechaISO()
+  };
+  agregarAlertaUnica(alerta);
+  const otros = miembrosDelGrupo(gid).filter((m) => m.userId !== yo.id);
+  if (MODO_NUBE) {
+    window.NUBE.insert("alertas", {
+      id: alerta.id, grupo_id: gid, emisor_id: yo.id, mensaje: alerta.message,
+      lat, lng, estado: "ACTIVE"
+    }).catch((e) => mostrarToast(e.message, "error"));
+    otros.forEach((mm) => {
+      window.NUBE.insert("notificaciones", {
+        usuario_id: mm.userId, tipo: "SOS", titulo: "SOS de " + yo.name, cuerpo: alerta.message
+      }).catch(() => {});
     });
-  });
+  } else {
+    otros.forEach((mm) => {
+      datos.notifications.push({
+        id: nuevoId(), userId: mm.userId, type: "SOS", title: "SOS de " + yo.name,
+        body: alerta.message, read: false, createdAt: fechaISO()
+      });
+    });
+  }
   salvarDatos();
   cerrarModal();
   actualizarBadge();
   mostrarToast("SOS enviado a tu círculo.", "exito");
 }
 
+function resolverSos(id) {
+  const a = datos.alerts.find((x) => x.id === id);
+  if (!a) return;
+  a.status = "RESOLVED";
+  a.resolvedAt = fechaISO();
+  if (MODO_NUBE) {
+    window.NUBE.actualizar("alertas", { estado: "RESOLVED", resuelta_en: a.resolvedAt }, "id", id).catch((e) => mostrarToast(e.message, "error"));
+  }
+  salvarDatos();
+  renderAlertas();
+  actualizarBadge();
+  mostrarToast("SOS marcado como resuelto.", "exito");
+}
+
 // ============================ GRUPOS ============================
-
-function usuarioPorId(id) { return datos.users.find((u) => u.id === id); }
-function grupoPorId(id) { return datos.groups.find((g) => g.id === id); }
-
-function gruposDe(userId) { return datos.groups.filter((g) => g.members.some((m) => m.userId === userId)); }
-
-function miembrosDe(userId) {
-  const lista = [];
-  gruposDe(userId).forEach((g) => g.members.forEach((m) => {
-    if (!lista.find((x) => x.userId === m.userId)) lista.push(m);
-  }));
-  return lista;
-}
-
-function miembrosDelGrupo(gid) {
-  const g = grupoPorId(gid);
-  return g ? g.members : [];
-}
-
-function rolEnGrupo(gid, userId) {
-  const g = grupoPorId(gid);
-  const m = g && g.members.find((x) => x.userId === userId);
-  return m ? m.role : null;
-}
-
-const ROL_LABEL = { OWNER: "Líder", ADMIN: "Co-líder", MEMBER: "Miembro" };
-
-function generarCodigo() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let code = "NEXO";
-  for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return code;
-}
 
 function renderGrupos() {
   const yo = usuarioActual();
@@ -458,10 +743,10 @@ function renderGrupos() {
     html += `
       <div class="tarjeta">
         <div class="tarjeta-fila">
-          <div class="avatar-miembro">${iniciales(g.name)}</div>
+          <div class="avatar-miembro" style="background:${colorDe(g.ownerId)}">${iniciales(g.name)}</div>
           <div style="flex:1">
             <strong>${esc(g.name)}</strong>
-            <div class="texto-suave">${g.members.length} miembros · código ${esc(g.code)} · ${fmtAgo(g.createdAt)}</div>
+            <div class="texto-suave">${g.members.length} miembros · código ${esc(g.code)}</div>
           </div>
           <span class="chip">${ROL_LABEL[rolEnGrupo(g.id, yo.id)]}</span>
         </div>
@@ -491,10 +776,16 @@ function crearGrupo() {
   if (!nombre) { mostrarToast("Escribe un nombre para el grupo.", "aviso"); return; }
   const yo = usuarioActual();
   const nuevo = {
-    id: uuid(), name: nombre, description: $("#nuevoGrupoDesc").value.trim(),
+    id: nuevoId(), name: nombre, description: $("#nuevoGrupoDesc").value.trim(),
     code: generarCodigo(), ownerId: yo.id, createdAt: fechaISO(),
     members: [{ userId: yo.id, role: "OWNER" }]
   };
+  if (MODO_NUBE) {
+    window.NUBE.insert("grupos", {
+      id: nuevo.id, nombre, descripcion: nuevo.description, codigo: nuevo.code, propietario_id: yo.id
+    }).catch((e) => mostrarToast(e.message, "error"));
+    window.NUBE.insert("miembros", { grupo_id: nuevo.id, usuario_id: yo.id, rol: "OWNER" }).catch((e) => mostrarToast(e.message, "error"));
+  }
   datos.groups.push(nuevo);
   salvarDatos();
   cerrarModal();
@@ -520,13 +811,26 @@ function unirseGrupo() {
   const yo = usuarioActual();
   if (!grupo) { mostrarToast("Código no válido.", "error"); return; }
   if (grupo.members.some((m) => m.userId === yo.id)) { mostrarToast("Ya formas parte de ese grupo.", "aviso"); cerrarModal(); return; }
-  grupo.members.push({ userId: yo.id, role: "MEMBER" });
-  datos.notifications.push({
-    id: uuid(), userId: grupo.ownerId, type: "GRUPO",
-    title: "Nuevo miembro", body: yo.name + " se unió a " + grupo.name,
-    read: false, createdAt: fechaISO()
-  });
-  salvarDatos();
+  if (MODO_NUBE) {
+    window.NUBE.insert("miembros", { grupo_id: grupo.id, usuario_id: yo.id, rol: "MEMBER" })
+      .then(() => {
+        grupo.members.push({ userId: yo.id, role: "MEMBER" });
+        salvarDatos();
+        actualizarMarcadores();
+        if (vistaActual === "grupo") renderGrupos();
+      })
+      .catch((e) => mostrarToast(e.message, "error"));
+    window.NUBE.insert("notificaciones", {
+      usuario_id: grupo.ownerId, tipo: "GRUPO", titulo: "Nuevo miembro", cuerpo: yo.name + " se unió a " + grupo.name
+    }).catch(() => {});
+  } else {
+    grupo.members.push({ userId: yo.id, role: "MEMBER" });
+    datos.notifications.push({
+      id: nuevoId(), userId: grupo.ownerId, type: "GRUPO", title: "Nuevo miembro",
+      body: yo.name + " se unió a " + grupo.name, read: false, createdAt: fechaISO()
+    });
+    salvarDatos();
+  }
   cerrarModal();
   mostrarToast("¡Bienvenido a " + grupo.name + "!", "exito");
   actualizarMarcadores();
@@ -543,7 +847,7 @@ function verDetalleGrupo(gid) {
     <button class="btn btn-conexo" onclick="grupoDetalleId=null; mostrarVista('grupo')">← Volver</button>
     <div class="tarjeta" style="margin-top:12px">
       <div class="tarjeta-fila">
-        <div class="avatar-miembro">${iniciales(g.name)}</div>
+        <div class="avatar-miembro" style="background:${colorDe(g.ownerId)}">${iniciales(g.name)}</div>
         <div style="flex:1">
           <strong>${esc(g.name)}</strong>
           <div class="texto-suave">${esc(g.description || "Sin descripción")}</div>
@@ -565,7 +869,7 @@ function verDetalleGrupo(gid) {
     const visible = u && u.shareLocation;
     html += `
       <div class="tarjeta tarjeta-fila">
-        <div class="avatar-miembro">${iniciales(u ? u.name : "?")}</div>
+        <div class="avatar-miembro" style="background:${colorDe(mm.userId)}">${iniciales(u ? u.name : "?")}</div>
         <div style="flex:1">
           <strong>${esc(u ? u.name : "Desconocido")}</strong>
           <div class="texto-suave ${visible ? "texto-exito" : ""}">${visible ? "Compartiendo ubicación" : "Ubicación oculta"}</div>
@@ -593,6 +897,7 @@ function regenerarCodigo() {
   const g = grupoPorId(grupoDetalleId);
   if (!g) return;
   g.code = generarCodigo();
+  if (MODO_NUBE) window.NUBE.actualizar("grupos", { codigo: g.code }, "id", g.id).catch((e) => mostrarToast(e.message, "error"));
   salvarDatos();
   verDetalleGrupo(g.id);
   mostrarToast("Nuevo código generado.", "exito");
@@ -602,6 +907,7 @@ function quitarMiembro(userId) {
   const g = grupoPorId(grupoDetalleId);
   if (!g) return;
   g.members = g.members.filter((m) => m.userId !== userId);
+  if (MODO_NUBE) window.NUBE.remove("miembros", { grupo_id: g.id, usuario_id: userId }).catch((e) => mostrarToast(e.message, "error"));
   salvarDatos();
   verDetalleGrupo(g.id);
   mostrarToast("Miembro retirado del círculo.", "exito");
@@ -610,7 +916,11 @@ function quitarMiembro(userId) {
 function salirGrupoConfirm() {
   if (!confirm("¿Salir de este grupo?")) return;
   const g = grupoPorId(grupoDetalleId);
-  if (g) g.members = g.members.filter((m) => m.userId !== usuarioActual().id);
+  const yo = usuarioActual();
+  if (g) {
+    g.members = g.members.filter((m) => m.userId !== yo.id);
+    if (MODO_NUBE) window.NUBE.remove("miembros", { grupo_id: g.id, usuario_id: yo.id }).catch((e) => mostrarToast(e.message, "error"));
+  }
   salvarDatos();
   grupoDetalleId = null;
   renderGrupos();
@@ -622,6 +932,7 @@ function eliminarGrupoConfirm() {
   if (!confirm("¿Eliminar el grupo y su historial?")) return;
   datos.groups = datos.groups.filter((g) => g.id !== grupoDetalleId);
   datos.alerts = datos.alerts.filter((a) => a.groupId !== grupoDetalleId);
+  if (MODO_NUBE) window.NUBE.borrar("grupos", "id", grupoDetalleId).catch((e) => mostrarToast(e.message, "error"));
   salvarDatos();
   grupoDetalleId = null;
   renderGrupos();
@@ -688,7 +999,7 @@ function abrirModalLugar() {
 function iniciarMapaPicker(lat, lng) {
   if (typeof L === "undefined") return;
   mapaPicker = L.map("miniMapa").setView([lat, lng], 15);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(mapaPicker);
+  L.tileLayer(URL_MAPA, { maxZoom: 18 }).addTo(mapaPicker);
   pickerMarker = L.marker([lat, lng]).addTo(mapaPicker);
   mapaPicker.on("click", (e) => {
     pickerMarker.setLatLng(e.latlng);
@@ -715,10 +1026,17 @@ function guardarLugar() {
   if (pickerMarker) { const ll = pickerMarker.getLatLng(); lat = ll.lat; lng = ll.lng; }
   else { const base = miPos || POSICION_BASE; lat = base.lat; lng = base.lng; }
   const yo = usuarioActual();
-  datos.places.push({
-    id: uuid(), userId: yo.id, name: nombre, category: $("#lugCategoria").value,
+  const lugar = {
+    id: nuevoId(), userId: yo.id, name: nombre, category: $("#lugCategoria").value,
     address: $("#lugDireccion").value.trim(), lat, lng, createdAt: fechaISO()
-  });
+  };
+  if (MODO_NUBE) {
+    window.NUBE.insert("lugares", {
+      id: lugar.id, usuario_id: yo.id, nombre, categoria: lugar.category,
+      direccion: lugar.address, lat, lng
+    }).catch((e) => mostrarToast(e.message, "error"));
+  }
+  datos.places.push(lugar);
   salvarDatos();
   cerrarModal();
   renderLugares();
@@ -728,17 +1046,13 @@ function guardarLugar() {
 function eliminarLugar(id) {
   if (!confirm("¿Eliminar este lugar?")) return;
   datos.places = datos.places.filter((p) => p.id !== id);
+  if (MODO_NUBE) window.NUBE.borrar("lugares", "id", id).catch((e) => mostrarToast(e.message, "error"));
   salvarDatos();
   renderLugares();
   mostrarToast("Lugar eliminado.", "exito");
 }
 
 // ============================ ALERTAS ============================
-
-function esDeMiGrupo(alerta) {
-  const yo = usuarioActual();
-  return gruposDe(yo.id).some((g) => g.id === alerta.groupId);
-}
 
 function renderAlertas() {
   const yo = usuarioActual();
@@ -758,9 +1072,9 @@ function renderAlertas() {
     const emisor = usuarioPorId(a.senderId);
     const grupo = grupoPorId(a.groupId);
     html += `
-      <div class="tarjeta" style="border-color:var(--peligro)">
+      <div class="tarjeta" style="border-color:var(--sos)">
         <div class="tarjeta-fila">
-          <div class="avatar-miembro" style="background:var(--peligro)">SOS</div>
+          <div class="avatar-miembro" style="background:linear-gradient(135deg,#FF8A8A,#FF4040)">SOS</div>
           <div style="flex:1">
             <strong>${esc(emisor ? emisor.name : "Miembro")}</strong>
             <div class="texto-suave">${esc(a.message)}</div>
@@ -809,39 +1123,36 @@ function renderAlertas() {
   });
   html += `</div>`;
 
-  html += `
-    <div class="seccion-alertas">
-      <h3>🧪 Simulación para presentar</h3>
-      <div class="tarjeta">
-        <div class="texto-suave">Genera una alerta SOS desde un miembro simulado para mostrar el flujo en vivo.</div>
-        <div class="fila-acciones">
-          <button class="btn btn-secundario" onclick="simularSosDeBrian()">SOS desde Brian</button>
+  if (!MODO_NUBE) {
+    html += `
+      <div class="seccion-alertas">
+        <h3>🧪 Simulación para presentar</h3>
+        <div class="tarjeta">
+          <div class="texto-suave">Genera una alerta SOS desde un miembro simulado para mostrar el flujo en vivo.</div>
+          <div class="fila-acciones">
+            <button class="btn btn-secundario" onclick="simularSosDeBrian()">SOS desde Brian</button>
+          </div>
         </div>
-      </div>
-    </div>`;
+      </div>`;
+  }
 
   $("#contenidoAlertas").innerHTML = html;
 }
 
-function resolverSos(id) {
-  const a = datos.alerts.find((x) => x.id === id);
-  if (!a) return;
-  a.status = "RESOLVED";
-  a.resolvedAt = fechaISO();
+function marcarLeida(id) {
+  const n = datos.notifications.find((x) => x.id === id);
+  if (!n) return;
+  n.read = true;
+  if (MODO_NUBE) window.NUBE.actualizar("notificaciones", { leida: true }, "id", id).catch(() => {});
   salvarDatos();
   renderAlertas();
   actualizarBadge();
-  mostrarToast("SOS marcado como resuelto.", "exito");
-}
-
-function marcarLeida(id) {
-  const n = datos.notifications.find((x) => x.id === id);
-  if (n) { n.read = true; salvarDatos(); renderAlertas(); actualizarBadge(); }
 }
 
 function marcarTodasLeidas() {
   const yo = usuarioActual();
   datos.notifications.forEach((n) => { if (n.userId === yo.id) n.read = true; });
+  if (MODO_NUBE) window.NUBE.actualizar("notificaciones", { leida: true }, "usuario_id", yo.id).catch(() => {});
   salvarDatos();
   renderAlertas();
   actualizarBadge();
@@ -850,6 +1161,7 @@ function marcarTodasLeidas() {
 
 function borrarNotificacion(id) {
   datos.notifications = datos.notifications.filter((n) => n.id !== id);
+  if (MODO_NUBE) window.NUBE.borrar("notificaciones", "id", id).catch(() => {});
   salvarDatos();
   renderAlertas();
   actualizarBadge();
@@ -861,16 +1173,14 @@ function simularSosDeBrian() {
   if (!grupo) { mostrarToast("Necesitas un grupo para la simulación.", "aviso"); return; }
   const brian = usuarioPorId("u-brian");
   const pos = vivo["u-brian"] || { lat: POSICION_BASE.lat + 0.01, lng: POSICION_BASE.lng - 0.01 };
-  datos.alerts.push({
-    id: uuid(), groupId: grupo.id, senderId: brian.id,
+  agregarAlertaUnica({
+    id: nuevoId(), groupId: grupo.id, senderId: brian.id,
     message: "Necesito ayuda en mi ubicación.",
     lat: pos.lat, lng: pos.lng, status: "ACTIVE", sentAt: fechaISO()
   });
-  datos.notifications.push({
-    id: uuid(), userId: yo.id, type: "SOS",
-    title: "SOS de Brian López",
-    body: "Envió una alerta desde el mapa.",
-    read: false, createdAt: fechaISO()
+  agregarNotifUnica({
+    id: nuevoId(), userId: yo.id, type: "SOS", title: "SOS de Brian López",
+    body: "Envió una alerta desde el mapa.", read: false, createdAt: fechaISO()
   });
   salvarDatos();
   renderAlertas();
@@ -898,7 +1208,7 @@ function renderPerfil() {
     <div class="subtitulo-panel">${esc(yo.email)}</div>
     <div class="tarjeta">
       <div class="tarjeta-fila">
-        <div class="avatar-miembro">${iniciales(yo.name)}</div>
+        <div class="avatar-miembro" style="background:${colorDe(yo.id)}">${iniciales(yo.name)}</div>
         <div style="flex:1">
           <strong>${esc(yo.name)}</strong>
           <div class="texto-suave">Miembro desde ${fmtFecha(yo.createdAt)}</div>
@@ -936,12 +1246,13 @@ function renderPerfil() {
     <div class="contenedor-vacio">
       <div class="logo-nudo" style="margin:0 auto 8px">
         <svg viewBox="0 0 64 64" style="width:40px;height:40px">
-          <circle cx="20" cy="20" r="12" fill="#F05454"/>
-          <circle cx="44" cy="20" r="12" fill="#D94646"/>
-          <circle cx="32" cy="40" r="12" fill="#F05454"/>
+          <circle cx="20" cy="20" r="12" fill="#8B5CF6"/>
+          <circle cx="44" cy="20" r="12" fill="#582C83"/>
+          <circle cx="32" cy="40" r="12" fill="#7E57C2"/>
         </svg>
       </div>
-      <div class="texto-suave">NEXO v1.0 · HTML + CSS + JavaScript<br>Mapa: Leaflet + OpenStreetMap</div>
+      <div class="texto-suave">NEXO v2.0 · HTML + CSS + JavaScript</div>
+      <div class="texto-suave">${MODO_NUBE ? "Base de datos: Supabase" : "Modo demostración (local)"}</div>
     </div>`;
   $("#contenidoPerfil").innerHTML = html;
 }
@@ -950,10 +1261,11 @@ function guardarPerfil() {
   const yo = usuarioActual();
   yo.name = $("#perfilNombre").value.trim() || yo.name;
   yo.phone = $("#perfilTelefono").value.trim();
+  if (MODO_NUBE) window.NUBE.guardarPerfil(yo.id, { nombre: yo.name, telefono: yo.phone }).catch((e) => mostrarToast(e.message, "error"));
   salvarDatos();
   renderPerfil();
   $("#textoEnVivo").textContent = yo.name;
-  if (marcadores["yo"]) {
+  if (marcadores["yo"] && mapa) {
     mapa.removeLayer(marcadores["yo"]);
     delete marcadores["yo"];
     if (yo.shareLocation && miPos) crearMarca("yo", yo.name, true);
@@ -967,11 +1279,13 @@ function alternarCompartir() {
   if (yo.shareLocation) {
     comenzarMiUbicacion();
     if (!miPos) usarPosicionPorDefecto();
+    if (MODO_NUBE && miPos) window.NUBE.reportarUbicacion(yo.id, miPos.lat, miPos.lng).catch(() => {});
     mostrarToast("Ahora tu círculo puede verte.", "exito");
   } else {
     detenerMiUbicacion();
     mostrarToast("Tu ubicación está oculta.", "aviso");
   }
+  if (MODO_NUBE) window.NUBE.guardarPerfil(yo.id, { share_ubicacion: yo.shareLocation }).catch((e) => mostrarToast(e.message, "error"));
   actualizarMarcadores();
   actualizarBannerPrivacidad();
   renderPerfil();
@@ -1020,6 +1334,9 @@ function borrarCuentaConfirm() {
   datos.users = datos.users.filter((u) => u.id !== yo.id);
   datos.groups = datos.groups.filter((g) => g.ownerId !== yo.id);
   datos.places = datos.places.filter((p) => p.userId !== yo.id);
+  if (MODO_NUBE) {
+    window.NUBE.cliente.auth.admin.deleteUser(yo.id).catch(() => {});
+  }
   salirApp();
   mostrarToast("Cuenta eliminada.", "aviso");
 }
@@ -1029,7 +1346,7 @@ function borrarCuentaConfirm() {
 function bindEvents() {
   $("#formLogin").addEventListener("submit", (e) => { e.preventDefault(); iniciarSesion(); });
   $("#formRegistro").addEventListener("submit", (e) => { e.preventDefault(); registrarUsuario(); });
-  $("#btnDemo").addEventListener("click", () => entrarComo("u-alicia"));
+  $("#btnDemo").addEventListener("click", entrarDemo);
   $("#linkRegistro").addEventListener("click", (e) => {
     e.preventDefault();
     $("#vistaLogin").classList.add("oculta");
@@ -1044,7 +1361,7 @@ function bindEvents() {
   });
   $("#linkOlvide").addEventListener("click", (e) => {
     e.preventDefault();
-    mostrarToast("En la demo usa la contraseña demo123", "aviso");
+    mostrarToast(MODO_NUBE ? "Te enviamos un enlace a tu correo." : "En la demo usa la contraseña demo123", "aviso");
   });
   $$(".tab").forEach((t) => t.addEventListener("click", () => mostrarVista(t.dataset.vista)));
   $("#btnSos").addEventListener("click", abrirModalSos);
@@ -1055,7 +1372,21 @@ function bindEvents() {
 
 function iniciar() {
   bindEvents();
-  if (usuarioActual()) entrarApp();
+  $("#modoNota").textContent = MODO_NUBE
+    ? "Conectado a la base de datos · Supabase"
+    : "Modo demostración · sin servidor";
+
+  if (MODO_NUBE) {
+    window.NUBE.cliente.auth.onAuthStateChange((evento, sesion) => {
+      if ((evento === "INITIAL_SESSION" || evento === "SIGNED_IN" || evento === "SIGNED_UP") && sesion) {
+        entrarAppNube(sesion.user).catch(() => {});
+      } else if (evento === "SIGNED_OUT") {
+        limpiarSesionUI();
+      }
+    });
+  } else if (usuarioActual()) {
+    entrarApp();
+  }
 }
 
 iniciar();
