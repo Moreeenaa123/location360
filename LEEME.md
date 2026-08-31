@@ -46,11 +46,20 @@ window.NEXO_CONFIG = {
 
 - Login y registro con diseño tipo Life360 (fondo con burbujas, sello NEXO).
 - Mapa oscuro con la ubicación de cada miembro (colores fijos por persona).
-- Grupos con código de invitación, roles (Líder / Co-líder / Miembro).
+- Grupos con **invitación por WhatsApp**: el líder comparte un enlace que la persona abre y entra al grupo con el código ya cargado.
 - Lugares guardados con **direcciones reales** (Buenos Aires).
 - Integración con **Waze**: botón "Navegar con Waze" (abre la app) y mapa integrado de Waze (iframe) para ver cada lugar.
 - Botón **SOS** con alerta a todo el círculo e historial.
 - Notificaciones con contador de no leídas.
+
+## Invitación a grupos por WhatsApp
+
+En el detalle de un grupo, el líder ve una tarjeta con el **código de invitación** y dos botones:
+
+1. **Invitar por WhatsApp** — abre WhatsApp (app en móvil o web en escritorio) con el mensaje ya armado y el enlace de invitación (`tu-app?unirse=CODIGO`).
+2. **Copiar enlace** — copia el enlace directo al portapapeles.
+
+Quien recibe el enlace lo abre, inicia sesión (o se registra) y la aplicación **detecta el parámetro `?unirse=CODIGO` y lo une al grupo automáticamente**. El enlace se construye a partir de la URL actual, así que funciona tanto en la versión local como en GitHub Pages.
 
 ## Integración con Waze
 

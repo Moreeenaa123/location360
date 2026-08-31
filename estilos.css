@@ -566,6 +566,31 @@ a {
 }
 
 
+/* BOTÓN WHATSAPP */
+
+.btn-whatsapp {
+  background: linear-gradient(
+    135deg,
+    #25D366 0%,
+    #1DA851 100%
+  );
+
+  color: #fff;
+
+  box-shadow:
+    0 4px 14px rgba(37, 211, 102, 0.3);
+}
+
+.btn-whatsapp:hover {
+  filter: brightness(1.06);
+
+  box-shadow:
+    0 8px 22px rgba(37, 211, 102, 0.45);
+
+  transform: translateY(-1px);
+}
+
+
 /* PIE LOGIN */
 
 .pie-auth {
@@ -1325,6 +1350,29 @@ a {
   color: var(--marca);
 
   margin: 8px 0 6px;
+}
+
+
+/* TARJETA DE INVITACIÓN */
+
+.tarjeta-invitacion {
+  background: linear-gradient(
+    160deg,
+    var(--marca-super-suave) 0%,
+    #FFF0F5 100%
+  );
+
+  border: 1.5px dashed var(--marca-claro);
+
+  border-radius: var(--radio-m);
+
+  padding: 16px 14px;
+
+  margin-top: 6px;
+}
+
+.tarjeta-invitacion .codigo-grande {
+  letter-spacing: 3px;
 }
 
 

@@ -173,6 +173,7 @@ function entrarApp() {
   mostrarVista("mapa");
   iniciarMapa();
   actualizarBadge();
+  setTimeout(procesarInvitacionEnlace, 300);
 }
 
 function limpiarSesionUI() {
@@ -762,30 +763,49 @@ function crearGrupo() {
   if (vistaActual === "grupo") renderGrupos();
 }
 
-function abrirModalUnirse() {
+function abrirModalUnirse(codigoPrefill) {
   abrirModal(`
     <h2>Unirme a un grupo</h2>
     <label>Código de invitación</label>
-    <input id="codigoUnirse" placeholder="NEXO1234" style="text-transform:uppercase">
+    <input id="codigoUnirse" value="${esc(codigoPrefill || "")}" placeholder="NEXO1234" style="text-transform:uppercase">
     <div class="fila-acciones">
       <button class="btn btn-conexo" onclick="cerrarModal()">Cancelar</button>
       <button class="btn btn-primario" onclick="unirseGrupo()">Unirme</button>
     </div>`);
 }
 
-function unirseGrupo() {
-  const codigo = $("#codigoUnirse").value.trim().toUpperCase();
-  const grupo = datos.groups.find((g) => g.code.toUpperCase() === codigo);
+function leerCodigoInvitacion() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const code = (params.get("unirse") || "").trim().toUpperCase();
+    return code || null;
+  } catch (e) { return null; }
+}
+
+function procesarInvitacionEnlace() {
+  const code = leerCodigoInvitacion();
+  if (!code) return;
   const yo = usuarioActual();
-  if (!grupo) { mostrarToast("Código no válido.", "error"); return; }
-  if (grupo.members.some((m) => m.userId === yo.id)) { mostrarToast("Ya formas parte de ese grupo.", "aviso"); cerrarModal(); return; }
+  if (!yo) return;
+  const grupo = datos.groups.find((g) => g.code.toUpperCase() === code);
+  if (!grupo) { mostrarToast("El enlace de invitación no es válido.", "error"); return; }
+  if (!grupo.members.some((m) => m.userId === yo.id)) {
+    unirseGrupoConCodigo(code);
+  } else {
+    mostrarToast("Ya formás parte de " + grupo.name + ".", "exito");
+  }
+}
+
+function unirseGrupoConCodigo(codigo) {
+  const grupo = datos.groups.find((g) => g.code.toUpperCase() === codigo);
+  if (!grupo) return;
+  const yo = usuarioActual();
   if (MODO_NUBE) {
     window.NUBE.insert("miembros", { grupo_id: grupo.id, usuario_id: yo.id, rol: "MEMBER" })
       .then(() => {
         grupo.members.push({ userId: yo.id, role: "MEMBER" });
         salvarDatos();
-        actualizarMarcadores();
-        if (vistaActual === "grupo") renderGrupos();
+        finalizarUnion(grupo);
       })
       .catch((e) => mostrarToast(e.message, "error"));
     window.NUBE.insert("notificaciones", {
@@ -798,11 +818,24 @@ function unirseGrupo() {
       body: yo.name + " se unió a " + grupo.name, read: false, createdAt: fechaISO()
     });
     salvarDatos();
+    finalizarUnion(grupo);
   }
-  cerrarModal();
-  mostrarToast("¡Bienvenido a " + grupo.name + "!", "exito");
+}
+
+function finalizarUnion(grupo) {
   actualizarMarcadores();
   if (vistaActual === "grupo") renderGrupos();
+  mostrarToast("¡Bienvenido a " + grupo.name + "!", "exito");
+}
+
+function unirseGrupo() {
+  const codigo = $("#codigoUnirse").value.trim().toUpperCase();
+  const grupo = datos.groups.find((g) => g.code.toUpperCase() === codigo);
+  const yo = usuarioActual();
+  if (!grupo) { mostrarToast("Código no válido.", "error"); return; }
+  if (grupo.members.some((m) => m.userId === yo.id)) { mostrarToast("Ya formas parte de ese grupo.", "aviso"); cerrarModal(); return; }
+  cerrarModal();
+  unirseGrupoConCodigo(codigo);
 }
 
 function verDetalleGrupo(gid) {
@@ -823,10 +856,21 @@ function verDetalleGrupo(gid) {
         <span class="chip">${ROL_LABEL[miRol]}</span>
       </div>
       <div style="margin-top:14px; text-align:center">
-        <div class="texto-suave">Código de invitación</div>
-        <div class="codigo-grande">${esc(g.code)}</div>
+        <div class="tarjeta-invitacion">
+          <div class="texto-suave">Código de invitación</div>
+          <div class="codigo-grande">${esc(g.code)}</div>
+          <div class="fila-acciones">
+            <button class="btn btn-whatsapp" onclick="compartirWhatsApp(grupoPorId(grupoDetalleId))">
+              <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm0 18.2a8.2 8.2 0 0 1-4.2-1.2l-.3-.2-3 .8.8-2.9-.2-.3A8.2 8.2 0 1 1 12 20.2zm4.5-6.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-2-1.2 7.5 7.5 0 0 1-1.4-1.7c-.1-.2 0-.4.1-.5l.4-.5a2 2 0 0 0 .3-.4c0-.2 0-.3 0-.4s-.6-1.5-.8-2-.4-.5-.6-.5h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4 5.1 5.1 0 0 0 3 .8 2 2 0 0 0 1.4-.7 1.4 1.4 0 0 0 .3-.9v-.5z"/></svg>
+              Invitar por WhatsApp
+            </button>
+            <button class="btn btn-secundario" onclick="copiarEnlaceInvitacion(grupoPorId(grupoDetalleId))">Copiar enlace</button>
+          </div>
+          <div class="texto-suave" style="font-size:12px;margin-top:8px">
+            Compartí el enlace por WhatsApp. Quien lo abra entrará a tu grupo con este código.
+          </div>
+        </div>
         <div class="fila-acciones">
-          <button class="btn btn-secundario" onclick="copiarCodigo('${esc(g.code)}')">Copiar</button>
           ${miRol === "OWNER" ? `<button class="btn btn-conexo" onclick="regenerarCodigo()">Nuevo código</button>` : ""}
         </div>
       </div>
@@ -859,6 +903,45 @@ function verDetalleGrupo(gid) {
 function copiarCodigo(codigo) {
   if (navigator.clipboard) { navigator.clipboard.writeText(codigo); mostrarToast("Código copiado.", "exito"); }
   else mostrarToast(codigo, "aviso");
+}
+
+function urlBaseApp() {
+  const href = window.location.href;
+  try {
+    const u = new URL(href);
+    u.search = "";
+    u.hash = "";
+    return u.toString();
+  } catch (e) {
+    return href.split("?")[0];
+  }
+}
+
+function enlaceInvitacion(g) {
+  const base = urlBaseApp();
+  return base + "?unirse=" + encodeURIComponent(g.code);
+}
+
+function mensajeWhatsApp(g) {
+  const base = urlBaseApp();
+  const url = base + "?unirse=" + encodeURIComponent(g.code);
+  return "Hola! Te invito a mi grupo " + g.name + " en NEXO para empezar a compartir la ubicación y estar más seguros. Abrí este enlace:\n" + url;
+}
+
+function compartirWhatsApp(g) {
+  const texto = encodeURIComponent(mensajeWhatsApp(g));
+  const esMovil = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const url = esMovil ? "https://wa.me/?text=" + texto : "https://api.whatsapp.com/send?text=" + texto;
+  window.open(url, "_blank");
+}
+
+function copiarEnlaceInvitacion(g) {
+  const enlace = enlaceInvitacion(g);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(enlace).then(() => mostrarToast("Enlace de invitación copiado.", "exito"));
+  } else {
+    window.prompt("Copiá este enlace de invitación:", enlace);
+  }
 }
 
 function regenerarCodigo() {
