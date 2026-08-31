@@ -782,37 +782,72 @@ function leerCodigoInvitacion() {
   } catch (e) { return null; }
 }
 
-function procesarInvitacionEnlace() {
+function busquedaLocalDeGrupo(codigo) {
+  return datos.groups.find((g) => g.code.toUpperCase() === codigo) || null;
+}
+
+async function buscarGrupoEnNube(codigo) {
+  if (!MODO_NUBE) return null;
+  try {
+    const g = await window.NUBE.buscarGrupoPorCodigo(codigo);
+    if (!g) return null;
+    const miembros = await window.NUBE.buscarMiembrosDe(g.id);
+    const local = {
+      id: g.id, name: g.nombre, description: g.descripcion, code: g.codigo,
+      ownerId: g.propietario_id, createdAt: g.created_at,
+      members: miembros.map((m) => ({ userId: m.usuario_id, role: m.rol }))
+    };
+    if (!datos.groups.some((x) => x.id === local.id)) datos.groups.push(local);
+    return local;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function resolverGrupoPorCodigo(codigo) {
+  const local = busquedaLocalDeGrupo(codigo);
+  if (local) return local;
+  return await buscarGrupoEnNube(codigo);
+}
+
+async function procesarInvitacionEnlace() {
   const code = leerCodigoInvitacion();
   if (!code) return;
   const yo = usuarioActual();
   if (!yo) return;
-  const grupo = datos.groups.find((g) => g.code.toUpperCase() === code);
-  if (!grupo) { mostrarToast("El enlace de invitación no es válido.", "error"); return; }
-  if (!grupo.members.some((m) => m.userId === yo.id)) {
-    unirseGrupoConCodigo(code);
-  } else {
-    mostrarToast("Ya formás parte de " + grupo.name + ".", "exito");
+  const grupo = await resolverGrupoPorCodigo(code);
+  if (!grupo) {
+    mostrarToast("El enlace de invitación no es válido o el grupo no existe.", "error");
+    return;
   }
+  if (grupo.members.some((m) => m.userId === yo.id)) {
+    mostrarToast("Ya formás parte de " + grupo.name + ".", "exito");
+    return;
+  }
+  await unirseGrupoConCodigo(code);
 }
 
-function unirseGrupoConCodigo(codigo) {
-  const grupo = datos.groups.find((g) => g.code.toUpperCase() === codigo);
-  if (!grupo) return;
+async function unirseGrupoConCodigo(codigo) {
+  const grupo = await resolverGrupoPorCodigo(codigo);
+  if (!grupo) {
+    mostrarToast("Código no válido.", "error");
+    return;
+  }
   const yo = usuarioActual();
   if (MODO_NUBE) {
-    window.NUBE.insert("miembros", { grupo_id: grupo.id, usuario_id: yo.id, rol: "MEMBER" })
-      .then(() => {
-        grupo.members.push({ userId: yo.id, role: "MEMBER" });
-        salvarDatos();
-        finalizarUnion(grupo);
-      })
-      .catch((e) => mostrarToast(e.message, "error"));
+    try {
+      await window.NUBE.insert("miembros", { grupo_id: grupo.id, usuario_id: yo.id, rol: "MEMBER" });
+      if (!grupo.members.some((m) => m.userId === yo.id)) grupo.members.push({ userId: yo.id, role: "MEMBER" });
+      salvarDatos();
+      finalizarUnion(grupo);
+    } catch (e) {
+      mostrarToast(e.message || "No se pudo unir al grupo.", "error");
+    }
     window.NUBE.insert("notificaciones", {
       usuario_id: grupo.ownerId, tipo: "GRUPO", titulo: "Nuevo miembro", cuerpo: yo.name + " se unió a " + grupo.name
     }).catch(() => {});
   } else {
-    grupo.members.push({ userId: yo.id, role: "MEMBER" });
+    if (!grupo.members.some((m) => m.userId === yo.id)) grupo.members.push({ userId: yo.id, role: "MEMBER" });
     datos.notifications.push({
       id: nuevoId(), userId: grupo.ownerId, type: "GRUPO", title: "Nuevo miembro",
       body: yo.name + " se unió a " + grupo.name, read: false, createdAt: fechaISO()
@@ -830,10 +865,11 @@ function finalizarUnion(grupo) {
 
 function unirseGrupo() {
   const codigo = $("#codigoUnirse").value.trim().toUpperCase();
-  const grupo = datos.groups.find((g) => g.code.toUpperCase() === codigo);
+  if (!codigo) { mostrarToast("Ingresá el código de invitación.", "aviso"); return; }
   const yo = usuarioActual();
-  if (!grupo) { mostrarToast("Código no válido.", "error"); return; }
-  if (grupo.members.some((m) => m.userId === yo.id)) { mostrarToast("Ya formas parte de ese grupo.", "aviso"); cerrarModal(); return; }
+  if (!yo) return;
+  const yaPertenece = datos.groups.some((g) => g.code.toUpperCase() === codigo && g.members.some((m) => m.userId === yo.id));
+  if (yaPertenece) { mostrarToast("Ya formas parte de un grupo con ese código.", "aviso"); cerrarModal(); return; }
   cerrarModal();
   unirseGrupoConCodigo(codigo);
 }

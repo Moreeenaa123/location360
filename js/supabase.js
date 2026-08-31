@@ -54,6 +54,18 @@ window.NUBE = (function () {
     return cliente.from(tabla).insert(fila);
   }
 
+  async function buscarGrupoPorCodigo(codigo) {
+    const r = await cliente.from("grupos").select("*").eq("codigo", codigo.toUpperCase()).maybeSingle();
+    if (r.error) throw new Error(r.error.message);
+    return r.data || null;
+  }
+
+  async function buscarMiembrosDe(grupoId) {
+    const r = await cliente.from("miembros").select("usuario_id, rol").eq("grupo_id", grupoId);
+    if (r.error) throw new Error(r.error.message);
+    return r.data || [];
+  }
+
   function actualizar(tabla, campos, columna, valor) {
     return cliente.from(tabla).update(campos).eq(columna, valor);
   }
@@ -102,7 +114,7 @@ window.NUBE = (function () {
   return {
     activo, cliente,
     inicioSesion, registro, cerrarSesion,
-    cargarTodo, insert, actualizar, borrar, remove,
+    cargarTodo, insert, buscarGrupoPorCodigo, buscarMiembrosDe, actualizar, borrar, remove,
     reportarUbicacion, guardarPerfil,
     conectarEnVivo, desconectarEnVivo,
     nuevoId: () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : uuid())
